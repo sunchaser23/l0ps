@@ -231,9 +231,6 @@ def checkleases(conn):
 
 # main
 
-import sys
-# ... (Your other imports and function definitions) ...
-
 config = None
 logger = None
 
