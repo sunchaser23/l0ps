@@ -12,14 +12,6 @@ def pay(config, conn, addr, dryrun):
 
     global logger
 
-    list_waves = {}
-    list_wavesdaolp = {}
-    list_unit0 = {}
-    sent_waves = 0
-    sent_wavesdaolp = 0
-    sent_unit0 = 0
-    sentcoins = 0
-
     logger.info('Preparing recipient list...')
 
     try:
