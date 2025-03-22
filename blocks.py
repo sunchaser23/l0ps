@@ -93,7 +93,7 @@ def getallblocks(conn, startblock, endblock):
 def checkandsave_leasetransaction(conn, block, transaction):
 
     global config, logger
-    #logger.debug(transaction)
+    
     if ('type' in transaction and transaction['type'] == 8 and (
         transaction['recipient'] == config['waves']['generatoraddress']
         or transaction['recipient'] == "address:" + config['waves']['generatoraddress']
@@ -134,13 +134,7 @@ def checkandsave_leasetransaction(conn, block, transaction):
             cursor.close()
 
 def checkleases(conn):
-    """
-    Checks active leases between the blockchain and the local database.
-
-    Args:
-        conn (sqlite3.Connection): SQLite3 database connection.
-    """
-
+    
     global logger, config
 
     height = pw.height()
@@ -242,7 +236,7 @@ def main():
 
     if len(sys.argv) < 1:
         print("Usage: python3 blocks [startblock] [endblock]")
-        sys.exit(1)  # Exit with a non-zero code to indicate an error
+        sys.exit(1)
 
     startblock = None
     if len(sys.argv) > 1:
@@ -262,14 +256,14 @@ def main():
 
     try:
         config = libs.load_config_from_file('config.json')
-        conn = sqlite3.connect(config['database'])  # Use the database filename from config
+        conn = sqlite3.connect(config['database'])  
         logger.info("Loading Blocks");
         getallblocks(conn, startblock, endblock)
         checkleases(conn)
     except Exception as e:
         logger.debug("Error: %s", e)
         logger.error(traceback.format_exc())
-        sys.exit(1) #exit with an error.
+        sys.exit(1) 
 
 if __name__ == "__main__":
     main()
