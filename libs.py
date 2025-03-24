@@ -3,6 +3,11 @@ import os
 import requests
 import json
 
+def height(host):
+    res = wrapper(host, '/blocks/height')
+    if res is not False:
+        return res['height']
+
 def get_balances(config, addr):
     balances = {}
     balances['waves'] = {

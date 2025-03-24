@@ -9,8 +9,8 @@ import json
 
 def getallblocks(conn, startblock, endblock):
     global config, logger
-    height = pw.height()
-    logger.debug(f"Height: {height}")
+    height = libs.height(config['waves']['node'])
+    logger.info(f"Height: {height}")
 
     _startblock = startblock
     _endblock = endblock
@@ -133,11 +133,11 @@ def checkandsave_leasetransaction(conn, block, transaction):
                 logger.debug(f"Block: {extendedtransaction['height']}: Found a lease cancellation,... id: {extendedtransaction['leaseId']}")
             cursor.close()
 
-def checkleases(conn):
+def checkleases(conn, endblock):
     
     global logger, config
 
-    height = pw.height()
+    height = libs.height(config['waves']['node'])
     logger.info(f"height: {height}")
     logger.info('Finding active leases on blockchain...')
 
@@ -150,7 +150,6 @@ def checkleases(conn):
     if res is not False:
         activeleases = res
 
-    logger.info(res)
     logger.info('Finding active leases on local db...')
 
     conn.row_factory = sqlite3.Row
@@ -175,19 +174,22 @@ def checkleases(conn):
 
     logger.debug(leases)
     logger.debug(activeleases)
+
     for id, data in leases.items():
         found = False
         if activeleases != None:
             for activelease in activeleases:
-                logger.info(f"Id: {id}, activeleases id: {activelease['id']}")
+                logger.debug(f"Id: {id}, activeleases id: {activelease['id']}")
                 if id == activelease['id']:
                     found = True
                     break
 
+        # we found a leases on db that is not active.
         if not found:
-            if data['height'] + 1000 > height:
+            if data['height'] + 1000 > endblock:
                 pass
             else:
+                # the lease on db is active, as it is not found to be active, it need to be closed.
                 logger.warning(f"Lease {id} not confirmed, amount: {data['amount'] / (10 ** 8)} needs to be closed")
                 tx = libs.tx(config['waves']['node'], id)
                 sql = f"UPDATE waves_leases SET endleasedate = {int(tx['timestamp'] / 1000)}, end = {tx['height']} WHERE tx_id = '{id}'"
@@ -204,8 +206,13 @@ def checkleases(conn):
     logger.info('Checking for active leases not present on DB...')
 
     for activelease in activeleases:
-        if activelease['id'] not in leases or leases[activelease['id']]['end'] is not None:
-            logger.warning(f"Lease {activelease['id']} is not registered in DB.")
+        #if active lease is not found in db or lease is in database but results not active, add it
+        if (
+           (activelease['id'] not in leases or leases[activelease['id']]['end'] is not None)
+           and 
+           activelease['height'] + 1000 < endblock
+           ):
+            logger.warning(f"Lease {activelease['id']} active at height: {activelease['height']+1000} height: {height} is not registered in DB, adding it.")
             tx = libs.tx(config['waves']['node'], activelease['id'])
             sql = f"""
                 REPLACE INTO waves_leases (tx_id, lease_id, txtype, address, start, leasedate, amount)
@@ -258,7 +265,7 @@ def main():
         conn = sqlite3.connect(config['database'])  
         logger.info("Loading Blocks");
         getallblocks(conn, startblock, endblock)
-        checkleases(conn)
+        checkleases(conn, endblock)
     except Exception as e:
         logger.debug("Error: %s", e)
         logger.error(traceback.format_exc())
