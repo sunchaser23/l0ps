@@ -151,7 +151,6 @@ def checkleases(conn):
         activeleases = res
 
     logger.info(res)
-    exit(1)
     logger.info('Finding active leases on local db...')
 
     conn.row_factory = sqlite3.Row
