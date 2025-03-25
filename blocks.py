@@ -8,6 +8,11 @@ import traceback
 import json
 
 def getallblocks(conn, startblock, endblock):
+    """
+    Get blocks from startblock to endblock
+    Analyse leases, unleases, rewards
+    """
+
     global config, logger
     height = libs.height(config['waves']['node'])
     logger.info(f"Height: {height}")
@@ -17,7 +22,7 @@ def getallblocks(conn, startblock, endblock):
 
     # If not specified, go incremental.
     if _startblock is None and _endblock is None:
-        # Get 1 block before so they are complete.
+        # Load from 1 block before
         _endblock = height - 1
         cursor = conn.cursor()
         cursor.execute(f"SELECT MAX(height) + 1 AS startblock FROM waves_blocks")
@@ -57,11 +62,11 @@ def getallblocks(conn, startblock, endblock):
         # Process blocks and transactions.
         for block in currentblocks:
             for transaction in block['transactions']:
-                if transaction['type'] in (8, 9, 16):
+                if transaction['type'] in (8, 9, 16, 18):
                     checkandsave_leasetransaction(conn, block, transaction)
                 else:
                     pass
-        # Saving Blocks...
+        # Saving blocks
         logger.debug(f"Saving Block Data")
         cursor = conn.cursor()
         for block in currentblocks:
@@ -85,12 +90,15 @@ def getallblocks(conn, startblock, endblock):
         totalsavedblocks += steps
 
         if totalsavedblocks % steps == 0:
-            logger.debug(f"Total Blocks Loaded: {totalsavedblocks}, committing...")
+            logger.info(f"Total Blocks Loaded: {totalsavedblocks}, committing...")
             conn.commit()
 
-        time.sleep(1)  # Convert microseconds to seconds
+        time.sleep(1)
 
 def checkandsave_leasetransaction(conn, block, transaction):
+    """
+    Check block for lease and unleases
+    """
 
     global config, logger
     
@@ -99,7 +107,7 @@ def checkandsave_leasetransaction(conn, block, transaction):
         or transaction['recipient'] == "address:" + config['waves']['generatoraddress']
         or transaction['recipient'] == "alias:W:" + config['waves']['generatoralias']
     )):
-        logger.debug(f"Block {block['height']}: found a lease to node, saving, id: {transaction['id']}")
+        logger.debug(f"Block {block['height']}: found a lease from {transaction['sender']}, saving, id: {transaction['id']}")
         cursor = conn.cursor()
         cursor.execute(
             """
@@ -133,102 +141,83 @@ def checkandsave_leasetransaction(conn, block, transaction):
                 logger.debug(f"Block: {extendedtransaction['height']}: Found a lease cancellation,... id: {extendedtransaction['leaseId']}")
             cursor.close()
 
-def checkleases(conn, endblock):
-    
-    global logger, config
+    elif 'type' in transaction and (transaction['type'] == 16 or transaction['type'] == 18):
+        leases = []
+        leasecancels = []
+        extendedtransaction = libs.tx(config['waves']['node'], transaction['id'])
 
-    height = libs.height(config['waves']['node'])
-    logger.info(f"height: {height}")
-    logger.info('Finding active leases on blockchain...')
+        # Check recursively invokes for leases and lease cancels
+        #logger.info(f"Analyzing tx {transaction['id']} type {transaction['type']}")
 
-    res = libs.wrapper(config['waves']['node'], f"leasing/active/{config['waves']['generatoraddress']}")
-    while res is False:
-        logger.warning('Error while fetching active leases, retrying...')
-        time.sleep(5)
-        res = libs.wrapper(config['waves']['node'], f"leasing/active/{config['waves']['generatoraddress']}")
+        if transaction['type'] == 16:
+            analyzestatechanges(extendedtransaction['stateChanges'], leases, leasecancels)
+        elif transaction['type'] == 18:
+            analyzestatechanges(extendedtransaction['payload']['stateChanges'], leases, leasecancels)
 
-    if res is not False:
-        activeleases = res
+        #logger.info(f"Tx {extendedtransaction['id']} has {len(leases)} leases and {len(leasecancels)} lease cancels.")
 
-    logger.info('Finding active leases on local db...')
-
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM waves_leases WHERE end IS NULL ORDER BY amount DESC, start ASC")
-    rows = cursor.fetchall()
-
-    leases = {}
-    amount = 0
-    for row in rows:
-        leases[row['tx_id']] = {  
-            'address': row['address'],  
-            'amount': row['amount'],  
-            'height': row['start'],  
-            'end': row['end'],  
-        }
-        amount += row['amount']
-
-    logger.info(f"Active leases on DB: {len(leases)}")
-    logger.info(f"Total amount: {amount / (10 ** 8)}")
-    logger.info("Checking for non-cancelled leases...")
-
-    logger.debug(leases)
-    logger.debug(activeleases)
-
-    for id, data in leases.items():
-        found = False
-        if activeleases != None:
-            for activelease in activeleases:
-                logger.debug(f"Id: {id}, activeleases id: {activelease['id']}")
-                if id == activelease['id']:
-                    found = True
-                    break
-
-        # we found a leases on db that is not active.
-        if not found:
-            if data['height'] + 1000 > endblock:
-                pass
-            else:
-                # the lease on db is active, as it is not found to be active, it need to be closed.
-                logger.warning(f"Lease {id} not confirmed, amount: {data['amount'] / (10 ** 8)} needs to be closed")
-                tx = libs.tx(config['waves']['node'], id)
-                sql = f"UPDATE waves_leases SET endleasedate = {int(tx['timestamp'] / 1000)}, end = {tx['height']} WHERE tx_id = '{id}'"
-
-                if dryrun == 'N':
-                    try:
-                        cursor.execute(sql)
-                        conn.commit()
-                    except sqlite3.Error as e:
-                        logger.error(f"SQLite Error: {e}")
-                else:
-                    logger.debug(sql)
-
-    logger.info('Checking for active leases not present on DB...')
-
-    for activelease in activeleases:
-        #if active lease is not found in db or lease is in database but results not active, add it
-        if (
-           (activelease['id'] not in leases or leases[activelease['id']]['end'] is not None)
-           and 
-           activelease['height'] + 1000 < endblock
-           ):
-            logger.warning(f"Lease {activelease['id']} active at height: {activelease['height']+1000} height: {height} is not registered in DB, adding it.")
-            tx = libs.tx(config['waves']['node'], activelease['id'])
-            sql = f"""
-                REPLACE INTO waves_leases (tx_id, lease_id, txtype, address, start, leasedate, amount)
-                VALUES ('{activelease['id']}', '{activelease['id']}', '{tx['type']}', '{activelease['sender']}', {activelease['height']}, {int(tx['timestamp'] / 1000)}, {activelease['amount']})
-            """
-
+        # Save leases
+        for lease in leases:
+            if (
+                lease['recipient'] == config['waves']['generatoraddress'] or
+                lease['recipient'] == "address:" + config['waves']['generatoraddress'] or
+                lease['recipient'] == "alias:W:" + config['waves']['generatoralias']
+            ):
+                logger.debug(f"Block: {transaction['height']}: Found a lease... id: {lease['id']}, saving it.")
+                try:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        """
+                        REPLACE INTO waves_leases (tx_id, lease_id, txtype, address, start, leasedate, end, amount)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            lease['id'],
+                            lease['id'],
+                            lease['type'],
+                            lease['sender'],
+                            block['height'],
+                            lease['timestamp'] // 1000,
+                            None,
+                            lease['amount'],
+                        )
+                    )
+                    conn.commit()
+                except sqlite3.Error as e:
+                    logger.error(f"Error saving lease: {e}")
+        # Save Cancel Lease
+        for leasecancel in leasecancels:
             try:
-                cursor.execute(sql)
+                cursor = conn.cursor()
+                cursor.execute(
+                    f"""
+                        UPDATE waves_leases
+                        SET end = {leasecancel['height']},
+                            endleasedate = {transaction['timestamp']//1000}
+                        WHERE lease_id = '{leasecancel['id']}'
+                    """
+                )
                 conn.commit()
+                if cursor.rowcount > 0:
+                    logger.debug(f"Block: {extendedtransaction['height']}: Found a lease cancellation... id: {leasecancel['id']}")
             except sqlite3.Error as e:
-                logger.error(f"SQLite Error: {e}")
-            else:
-                logger.debug(sql)
+                logger.error(f"Error updating lease cancellation: {e}")
 
-    cursor.close()
+def analyzestatechanges(statechanges, leases, leasecancels):
+    """
+    Analyzes the state changes of a transaction and extracts lease and lease cancellation information.
+    """
 
+    if 'leases' in statechanges and isinstance(statechanges['leases'], list) and statechanges['leases']:
+        leases.extend(statechanges['leases'])
+
+    if 'leaseCancels' in statechanges and isinstance(statechanges['leaseCancels'], list) and statechanges['leaseCancels']:
+        leasecancels.extend(statechanges['leaseCancels'])
+
+    if 'invokes' in statechanges and isinstance(statechanges['invokes'], list) and statechanges['invokes']:
+        for invoke in statechanges['invokes']:
+            if 'stateChanges' in invoke:
+                analyzestatechanges(invoke['stateChanges'], leases, leasecancels)
 # main
 
 config = None
@@ -265,7 +254,6 @@ def main():
         conn = sqlite3.connect(config['database'])  
         logger.info("Loading Blocks");
         getallblocks(conn, startblock, endblock)
-        checkleases(conn, endblock)
     except Exception as e:
         logger.debug("Error: %s", e)
         logger.error(traceback.format_exc())
