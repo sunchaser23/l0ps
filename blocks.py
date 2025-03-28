@@ -99,11 +99,11 @@ def getallblocks(conn, startblock, endblock):
         else:
             _startblock = _endblock
 
-        totalsavedblocks += steps
+        totalsavedblocks += len(currentblocks)
 
-        if totalsavedblocks % steps == 0:
-            logger.info(f"Total Blocks Loaded: {totalsavedblocks}, committing...")
-            conn.commit()
+
+        logger.info(f"Total Blocks Loaded: {totalsavedblocks}, committing...")
+        conn.commit()
 
         time.sleep(1)
 
