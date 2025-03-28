@@ -3,7 +3,7 @@ import pywaves as pw
 import time
 import sqlite3
 import libs
-import logging 
+import logging
 import traceback
 import json
 
@@ -46,7 +46,7 @@ def getallblocks(conn, startblock, endblock):
             else:
                 raise Exception('CURL error while fetching blocks.')
         else:
-            logger.info("Getting blocks from %d to %d" % ( _startblock, _startblock + (steps - 1)))
+            logger.info("Getting blocks from %d to %d" % ( _startblock, _endblock))
             res = libs.wrapper(config['waves']['node'], '/blocks/seq/%d/%d' % (_startblock, _endblock))
             while res is False:
                 logger.debug('Got error from CURL, retrying in 5 secs...')
@@ -101,7 +101,7 @@ def checkandsave_leasetransaction(conn, block, transaction):
     """
 
     global config, logger
-    
+
     if ('type' in transaction and transaction['type'] == 8 and (
         transaction['recipient'] == config['waves']['generatoraddress']
         or transaction['recipient'] == "address:" + config['waves']['generatoraddress']
@@ -257,7 +257,7 @@ def main():
     except Exception as e:
         logger.debug("Error: %s", e)
         logger.error(traceback.format_exc())
-        sys.exit(1) 
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
