@@ -9,7 +9,8 @@ license = {text = "+"}
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "pywaves (>=1.0.5,<2.0.0)"
+    "pywaves (>=1.0.5,<2.0.0)",
+    "python-axolotl-curve25519 @ git+https://github.com/ysavchenko/python-axolotl-curve25519.git"
 ]
 
 [build-system]
