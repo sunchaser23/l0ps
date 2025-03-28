@@ -59,11 +59,23 @@ def getallblocks(conn, startblock, endblock):
 
         time.sleep(1)
 
-        # Process blocks and transactions.
+        # Collect all relevant transaction ids from all currentblocks
+        tx_ids = []
+        for block in currentblocks:
+            tx_ids.extend([tx['id'] for tx in block['transactions'] if tx['type'] in (9, 16, 18)])
+
+        # Fetch extended tx info
+        extended_map = {}
+        extended_transactions = libs.tx_bulk(config['waves']['node'], tx_ids)
+        logger.debug(f"Found {len(tx_ids)} txs")
+        extended_map.update({tx['id']: tx for tx in extended_transactions})
+
+        # Process blocks and transactions
         for block in currentblocks:
             for transaction in block['transactions']:
                 if transaction['type'] in (8, 9, 16, 18):
-                    checkandsave_leasetransaction(conn, block, transaction)
+                    extended_tx = extended_map.get(transaction['id'])
+                    checkandsave_leasetransaction(conn, block, transaction, extended_tx)
                 else:
                     pass
         # Saving blocks
@@ -95,7 +107,7 @@ def getallblocks(conn, startblock, endblock):
 
         time.sleep(1)
 
-def checkandsave_leasetransaction(conn, block, transaction):
+def checkandsave_leasetransaction(conn, block, transaction, extendedtransaction):
     """
     Check block for lease and unleases
     """
@@ -127,7 +139,6 @@ def checkandsave_leasetransaction(conn, block, transaction):
         )
         cursor.close()
     elif 'type' in transaction and transaction['type'] == 9:
-        extendedtransaction = libs.tx(config['waves']['node'], transaction['id'])
         if extendedtransaction['lease']['recipient'] == config['waves']['generatoraddress']:
             cursor = conn.cursor()
             sql = f"""
@@ -144,7 +155,6 @@ def checkandsave_leasetransaction(conn, block, transaction):
     elif 'type' in transaction and (transaction['type'] == 16 or transaction['type'] == 18):
         leases = []
         leasecancels = []
-        extendedtransaction = libs.tx(config['waves']['node'], transaction['id'])
 
         # Check recursively invokes for leases and lease cancels
         #logger.info(f"Analyzing tx {transaction['id']} type {transaction['type']}")
