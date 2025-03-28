@@ -163,7 +163,7 @@ def checkandsave_leasetransaction(conn, block, transaction):
                 lease['recipient'] == "address:" + config['waves']['generatoraddress'] or
                 lease['recipient'] == "alias:W:" + config['waves']['generatoralias']
             ):
-                logger.debug(f"Block: {transaction['height']}: Found a lease... id: {lease['id']}, saving it.")
+                logger.debug(f"Block: {extendedtransaction['height']}: Found a lease... id: {lease['id']}, saving it.")
                 try:
                     cursor = conn.cursor()
                     cursor.execute(
@@ -172,12 +172,12 @@ def checkandsave_leasetransaction(conn, block, transaction):
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
+                            transaction['id'],
                             lease['id'],
-                            lease['id'],
-                            lease['type'],
+                            transaction['type'],
                             lease['sender'],
                             block['height'],
-                            lease['timestamp'] // 1000,
+                            transaction['timestamp'] // 1000,
                             None,
                             lease['amount'],
                         )
@@ -192,8 +192,8 @@ def checkandsave_leasetransaction(conn, block, transaction):
                 cursor.execute(
                     f"""
                         UPDATE waves_leases
-                        SET end = {leasecancel['height']},
-                            endleasedate = {transaction['timestamp']//1000}
+                        SET end = {extendedtransaction['height']},
+                            endleasedate = {extendedtransaction['timestamp']//1000}
                         WHERE lease_id = '{leasecancel['id']}'
                     """
                 )
