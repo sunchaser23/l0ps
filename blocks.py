@@ -3,7 +3,7 @@ import pywaves as pw
 import time
 import sqlite3
 import libs
-import logging 
+import logging
 import traceback
 import json
 
@@ -46,7 +46,7 @@ def getallblocks(conn, startblock, endblock):
             else:
                 raise Exception('CURL error while fetching blocks.')
         else:
-            logger.info("Getting blocks from %d to %d" % ( _startblock, _startblock + (steps - 1)))
+            logger.info("Getting blocks from %d to %d" % ( _startblock, _endblock))
             res = libs.wrapper(config['waves']['node'], '/blocks/seq/%d/%d' % (_startblock, _endblock))
             while res is False:
                 logger.debug('Got error from CURL, retrying in 5 secs...')
@@ -59,11 +59,23 @@ def getallblocks(conn, startblock, endblock):
 
         time.sleep(1)
 
-        # Process blocks and transactions.
+        # Collect all relevant transaction ids from all currentblocks
+        tx_ids = []
+        for block in currentblocks:
+            tx_ids.extend([tx['id'] for tx in block['transactions'] if tx['type'] in (9, 16, 18)])
+
+        # Fetch extended tx info
+        extended_map = {}
+        extended_transactions = libs.tx_bulk(config['waves']['node'], tx_ids)
+        logger.debug(f"Found {len(tx_ids)} txs")
+        extended_map.update({tx['id']: tx for tx in extended_transactions})
+
+        # Process blocks and transactions
         for block in currentblocks:
             for transaction in block['transactions']:
                 if transaction['type'] in (8, 9, 16, 18):
-                    checkandsave_leasetransaction(conn, block, transaction)
+                    extended_tx = extended_map.get(transaction['id'])
+                    checkandsave_leasetransaction(conn, block, transaction, extended_tx)
                 else:
                     pass
         # Saving blocks
@@ -87,21 +99,21 @@ def getallblocks(conn, startblock, endblock):
         else:
             _startblock = _endblock
 
-        totalsavedblocks += steps
+        totalsavedblocks += len(currentblocks)
 
-        if totalsavedblocks % steps == 0:
-            logger.info(f"Total Blocks Loaded: {totalsavedblocks}, committing...")
-            conn.commit()
+
+        logger.info(f"Total Blocks Loaded: {totalsavedblocks}, committing...")
+        conn.commit()
 
         time.sleep(1)
 
-def checkandsave_leasetransaction(conn, block, transaction):
+def checkandsave_leasetransaction(conn, block, transaction, extendedtransaction):
     """
     Check block for lease and unleases
     """
 
     global config, logger
-    
+
     if ('type' in transaction and transaction['type'] == 8 and (
         transaction['recipient'] == config['waves']['generatoraddress']
         or transaction['recipient'] == "address:" + config['waves']['generatoraddress']
@@ -127,7 +139,6 @@ def checkandsave_leasetransaction(conn, block, transaction):
         )
         cursor.close()
     elif 'type' in transaction and transaction['type'] == 9:
-        extendedtransaction = libs.tx(config['waves']['node'], transaction['id'])
         if extendedtransaction['lease']['recipient'] == config['waves']['generatoraddress']:
             cursor = conn.cursor()
             sql = f"""
@@ -144,7 +155,6 @@ def checkandsave_leasetransaction(conn, block, transaction):
     elif 'type' in transaction and (transaction['type'] == 16 or transaction['type'] == 18):
         leases = []
         leasecancels = []
-        extendedtransaction = libs.tx(config['waves']['node'], transaction['id'])
 
         # Check recursively invokes for leases and lease cancels
         #logger.info(f"Analyzing tx {transaction['id']} type {transaction['type']}")
@@ -163,7 +173,7 @@ def checkandsave_leasetransaction(conn, block, transaction):
                 lease['recipient'] == "address:" + config['waves']['generatoraddress'] or
                 lease['recipient'] == "alias:W:" + config['waves']['generatoralias']
             ):
-                logger.debug(f"Block: {transaction['height']}: Found a lease... id: {lease['id']}, saving it.")
+                logger.debug(f"Block: {extendedtransaction['height']}: Found a lease... id: {lease['id']}, saving it.")
                 try:
                     cursor = conn.cursor()
                     cursor.execute(
@@ -172,12 +182,12 @@ def checkandsave_leasetransaction(conn, block, transaction):
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
+                            transaction['id'],
                             lease['id'],
-                            lease['id'],
-                            lease['type'],
+                            transaction['type'],
                             lease['sender'],
                             block['height'],
-                            lease['timestamp'] // 1000,
+                            transaction['timestamp'] // 1000,
                             None,
                             lease['amount'],
                         )
@@ -192,8 +202,8 @@ def checkandsave_leasetransaction(conn, block, transaction):
                 cursor.execute(
                     f"""
                         UPDATE waves_leases
-                        SET end = {leasecancel['height']},
-                            endleasedate = {transaction['timestamp']//1000}
+                        SET end = {extendedtransaction['height']},
+                            endleasedate = {extendedtransaction['timestamp']//1000}
                         WHERE lease_id = '{leasecancel['id']}'
                     """
                 )
@@ -257,7 +267,7 @@ def main():
     except Exception as e:
         logger.debug("Error: %s", e)
         logger.error(traceback.format_exc())
-        sys.exit(1) 
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

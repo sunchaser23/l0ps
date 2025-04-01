@@ -79,6 +79,23 @@ def tx(host, tx_id):
     if res is not False:
         return res
 
+def tx_bulk(host, tx_ids):
+    """Gets multiple transactions by their IDs in chunks."""
+    if not tx_ids:
+        return []
+    all_results = []
+    chunk_size = 900
+    for i in range(0, len(tx_ids), chunk_size):
+        chunk_ids = tx_ids[i:i + chunk_size]
+        body = json.dumps({"ids": chunk_ids})
+        res = wrapper(host, "/transactions/info", postData=body)
+        if res is not False:
+            all_results.extend(res)
+        else:
+            print(f"Failed to fetch or unexpected response for chunk starting at index {i}: {res}")
+            sys.exit(1)
+    return all_results
+
 def encrypt_decrypt(mode, password, encrypted_key):
     """Encrypts/decrypts a key."""
     key = Fernet.generate_key() #generate a key, or load a key from a file.
