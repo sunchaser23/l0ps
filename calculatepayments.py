@@ -46,15 +46,64 @@ def getwavesactiveleasesatblock(height, leases_x_id):
         'total': 0
     }
 
-    for data in leases_x_id.values():
-        if data[4] + 1000 < height and (data[7] is None or data[7] > height):
+    # Collect leases within the window of interest (last 1000 blocks)
+    lower_bound = height - 1000
+    grouped_by_address = {}
 
-            if data[3] not in activeleasesinfo['leases']:
-                activeleasesinfo['leases'][data[3]] = data[8]
+    for lease in leases_x_id.values():
+        address = lease[3]
+        start = lease[4]
+        end = lease[7] if lease[7] is not None else float('inf')
+        amount = lease[8]
+
+        # Check if lease fully cover [lower_bound, height]
+        if start < lower_bound and height < end:
+
+            if address not in activeleasesinfo['leases']:
+                activeleasesinfo['leases'][address] = amount
             else:
-                activeleasesinfo['leases'][data[3]] += data[8]
+                activeleasesinfo['leases'][address] += amount
 
-            activeleasesinfo['total'] += data[8]
+            activeleasesinfo['total'] += amount
+            continue
+
+        # Check if lease intersects [lower_bound, height]
+        if end < lower_bound or start > height:
+            continue
+
+        if address not in grouped_by_address:
+            grouped_by_address[address] = []
+        grouped_by_address[address].append((start, end, amount))
+
+    for address, leases in grouped_by_address.items():
+        # Build intervals from leases
+        intervals = []
+        min_amount = float('inf')
+
+        for start, end, amount in leases:
+            from_block = max(start, lower_bound)
+            to_block = min(end, height)
+            intervals.append((from_block, to_block))
+            min_amount = min(min_amount, amount)
+
+        # Sort intervals by start block
+        intervals.sort()
+        current = lower_bound
+        fully_covered = True
+
+        # Check leases by_address fully cover [lower_bound, height]
+        for start, end in intervals:
+            if start > current:
+                fully_covered = False
+                break
+            current = max(current, end)
+
+        if fully_covered and current >= height:
+            if address not in activeleasesinfo['leases']:
+                activeleasesinfo['leases'][address] = min_amount
+            else:
+                activeleasesinfo['leases'][address] += min_amount
+            activeleasesinfo['total'] += min_amount
 
     return activeleasesinfo
 
