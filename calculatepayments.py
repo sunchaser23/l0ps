@@ -7,7 +7,6 @@ import libs
 import sqlite3
 import datetime
 
-
 def savepayments(config, conn, payments, blocksinfo, totals, dryrun):
     global logger
 
@@ -42,10 +41,7 @@ def savepayments(config, conn, payments, blocksinfo, totals, dryrun):
 
 def getwavesactiveleasesatblock(height, leases_x_id):
 
-    activeleasesinfo = {
-        'leases': {},
-        'total': 0
-    }
+    activeleasesinfo = {'total':0}
 
     # Collect leases within the window of interest (last 1000 blocks)
     # This manages single leases
@@ -60,52 +56,27 @@ def getwavesactiveleasesatblock(height, leases_x_id):
         end = lease[7] if lease[7] is not None else float('inf')
         amount = lease[8]
 
-        # Check if lease fully cover [lower_bound, height]
-        if start < lower_bound and height < end:
-
-            if 'leases' not in activeleasesinfo:
-                activeleasesinfo['leases'] = {}
-            if address not in activeleasesinfo['leases']:
-                activeleasesinfo['leases'][address] = {'addressleases': {}, 'total': 0}
-
-            activeleasesinfo['leases'][address]['addressleases'][lease_id] = amount
-            activeleasesinfo['leases'][address]['total'] += amount
-
-            if 'total' not in activeleasesinfo:
-                activeleasesinfo['total'] = 0
-            activeleasesinfo['total'] += amount
-            continue
-
-        # Check if lease intersects [lower_bound, height]
-        if end < lower_bound or start > height:
-            continue
-
+        # group leases by address
         if address not in grouped_by_address:
             grouped_by_address[address] = []
         grouped_by_address[address].append((lease[0], start, end, amount))
 
     # This manages continuous leases (leases that are closed and reopened in the same block)
+
     for address, leases in grouped_by_address.items():
-        # Build intervals from leases
         intervals = []
-        min_amount = float('inf')
-
-        # foreach lease of the address i add their interval 
+        # foreach lease of the address add their interval 
         for lease_id, start, end, amount in leases:
-            #from_block = max(start, lower_bound)
-            #to_block = min(end, height)
             intervals.append((lease_id, amount, start, end))
-            # determine min amount leased 
-            # min_amount = min(min_amount, amount)
-
-        #print (f"{height} {address} {intervals}")
-        #intervals.sort(key=lambda x: x[2])
 
         merged = intervals[:]
   
         # we check every leases for the address and at the present height 
         # we are searhing for leases that starts on the same block when another leases was canceled 
-        # we consider them as "merged/continuous" and we get as amount the amount of the last lease
+        # we consider them as "merged/continuous" we merge them and we keep as amount the amount 
+        # of the last lease in the chain
+        # 
+        # non continuous leases are kept as they are
         #        
         # example: 
         # lease1 amount: 20 [start-end]: [3000 - 4500]
@@ -117,14 +88,18 @@ def getwavesactiveleasesatblock(height, leases_x_id):
         # The result: at block 5000 lease2 generation amount is calculated as 10
         #
 
+        logger.debug(f"LEASES: {height} {address} {merged}")
+
         i = 0
         while i < len(merged):
             j = 0
             while j < len(merged):
                 if i != j and merged[i][3] == merged[j][2]:  # Check if end_block matches start_block
-                    # Merge leases by updating the end_block and amount_leased
+                    # Merge continuous leases by updating the end_block and amount_leased
+                    merged_ids = merged[i][0] if isinstance(merged[i][0], list) else [merged[i][0]]
+                    merged_ids.append(merged[j][0])  # Add the lease_id of the second lease
                     merged[i] = (
-                        merged[j][0],  # Keep the lease_id of the second lease
+                        merged_ids,  # Keep track of all merged lease_ids
                         merged[j][1],  # Update amount_leased to the last lease's amount
                         merged[i][2],  # Keep the start_block of the first lease
                         merged[j][3]   # Update end_block to the last lease's end_block
@@ -138,30 +113,28 @@ def getwavesactiveleasesatblock(height, leases_x_id):
             i += 1
 
         # Filter out entries with start or end outside bounds
-        merged = [lease for lease in merged if lease[3] > height and lease[2] < lower_bound]
+        merged = [lease for lease in merged if lease[2] < lower_bound and lease[3] > height]
 
-        #print(f"{height} {address} {merged}")
+        logger.debug(f"MERGED: {height} {address} {merged}")
 
+        if not merged:
+            activeleasesinfo['leases'] = {address: {'total': 0}}
         for lease in merged:
-            lease_id, amount = lease[0], lease[1]
+            lease_ids, amount = lease[0], lease[1]
+            if not isinstance(lease_ids, list):
+                lease_ids = [lease_ids]  # Ensure lease_ids is a list
 
             if 'leases' not in activeleasesinfo:
                 activeleasesinfo['leases'] = {}
             if address not in activeleasesinfo['leases']:
-                activeleasesinfo['leases'][address] = {'addressleases': {}, 'total': 0}
+                activeleasesinfo['leases'][address] = {'total': 0}
 
-            activeleasesinfo['leases'][address]['addressleases'][lease_id] = amount
             activeleasesinfo['leases'][address]['total'] += amount
-
-            if 'total' not in activeleasesinfo:
-                activeleasesinfo['total'] = 0
-
             activeleasesinfo['total'] += amount
 
-    #print(f"{height} {address} {activeleasesinfo}")
+        logger.debug(f"ACTIVE: {height} {address} {activeleasesinfo}")
 
     return activeleasesinfo
-
 
 def distribute(config, blocksinfo, balances, leases_x_id):
     airdroprewards = {}
@@ -188,11 +161,10 @@ def distribute(config, blocksinfo, balances, leases_x_id):
     blockrewards = res['currentReward'] / 3
 
     for height, blockinfo in blocksinfo['blocks'].items():
-        #print(f"Processing block: {blockinfo[0]}")
         if blockinfo[1] != config['waves']['generatoraddress']:
             pass
         else:
-            print(f"Block: {blockinfo[0]} mined!")
+            logger.debug(f"Block: {blockinfo[0]} mined!")
             # calculate waves rewards
             blockfees = previousblockinfo[2] * 0.6 + blockinfo[2] * 0.4
             leasersblockfees = (blockfees * int(config['waves']['percentagetodistribute']) / 100)
@@ -346,7 +318,7 @@ def main():
     global logger
 
     if len(sys.argv) != 2:
-        print("Usage: python calculatepayments.py [dryrun Y!N]")
+        logger.debug("Usage: python calculatepayments.py [dryrun Y!N]")
         sys.exit(1)
 
     logger = libs.setup_logger(log_file="l0ps.log", log_level=logging.DEBUG, name="calculatepayments")
@@ -388,7 +360,6 @@ def main():
 
     # Load leases info
     leases_x_block, leases_x_id = getleasesinfo(config, conn)
-    #print(leases_x_id)
 
     # distribute payments
     payments = {}
