@@ -157,12 +157,14 @@ def checkandsave_leasetransaction(conn, block, transaction, extendedtransaction)
         leasecancels = []
 
         # Check recursively invokes for leases and lease cancels
-        #logger.info(f"Analyzing tx {transaction['id']} type {transaction['type']}")
+        # logger.info(f"Analyzing tx {transaction['id']} type {transaction['type']}")
 
         if transaction['type'] == 16:
-            analyzestatechanges(extendedtransaction['stateChanges'], leases, leasecancels)
+            if 'stateChanges' in extendedtransaction and extendedtransaction['stateChanges'] is not None:
+                analyzestatechanges(extendedtransaction['stateChanges'], leases, leasecancels)
         elif transaction['type'] == 18:
-            analyzestatechanges(extendedtransaction['payload']['stateChanges'], leases, leasecancels)
+            if 'stateChanges' in extendedtransaction['payload'] and extendedtransaction['payload']['stateChanges'] is not None:
+                analyzestatechanges(extendedtransaction['payload']['stateChanges'], leases, leasecancels)
 
         #logger.info(f"Tx {extendedtransaction['id']} has {len(leases)} leases and {len(leasecancels)} lease cancels.")
 
