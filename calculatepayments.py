@@ -18,7 +18,7 @@ def savepayments(config, conn, payments, blocksinfo, totals, dryrun):
         """
     try:
         cursor = conn.cursor()
-        cursor.execute(sql, (blocksinfo['startblock']+1, blocksinfo['endblock'], blocksinfo['minedblocks'], json.dumps(totals), 'Y', now))
+        cursor.execute(sql, (blocksinfo['startblock']+1, blocksinfo['endblock'], blocksinfo['minedblocks'], json.dumps(totals), 'Y', now.isoformat()))
         payment_id = cursor.lastrowid
 
         for address, tokens in payments.items():
@@ -45,7 +45,7 @@ def getwavesactiveleasesatblock(height, leases_x_id):
         'leases': {},
         'total': 0
     }
-
+    logger.debug(f"Block height: {height}")
     # Collect leases within the window of interest (last 1000 blocks)
     lower_bound = height - 1000
     grouped_by_address = {}
@@ -55,7 +55,7 @@ def getwavesactiveleasesatblock(height, leases_x_id):
         start = lease[4]
         end = lease[7] if lease[7] is not None else float('inf')
         amount = lease[8]
-
+        logger.debug(f"lease: {lease}, address: {address}, start: {start}, end: {end}, amount: {amount}")
         # Check if lease fully cover [lower_bound, height]
         if start < lower_bound and height < end:
 
@@ -104,6 +104,8 @@ def getwavesactiveleasesatblock(height, leases_x_id):
             else:
                 activeleasesinfo['leases'][address] += min_amount
             activeleasesinfo['total'] += min_amount
+
+    logger.debug(f"{activeleasesinfo}")
 
     return activeleasesinfo
 
