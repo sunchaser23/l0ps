@@ -18,17 +18,22 @@ def getallblocks(conn, startblock, endblock):
     logger.info(f"Height: {height}")
 
     _startblock = startblock
-    _endblock = endblock
-
+    _endblock = endblock    
+    
     # If not specified, go incremental.
-    if _startblock is None and _endblock is None:
-        # Load from 1 block before
+    
+    if _endblock is None:
         _endblock = height - 1
+    
+    if _startblock is None:
+        # Load from 1 block before
         cursor = conn.cursor()
         cursor.execute(f"SELECT MAX(height) + 1 AS startblock FROM waves_blocks")
         row = cursor.fetchone()
         _startblock = row[0] if row[0] else 1 #if row[0] is none, start from block 1
         cursor.close()
+
+    logger.info(f"Loading Blocks from {_startblock} to {_endblock}")
 
     steps = 100
     totalsavedblocks = 0
