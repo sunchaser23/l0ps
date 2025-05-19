@@ -5,7 +5,6 @@ description = "L0 WAVES Payment Script"
 authors = [
     {name = "Sunchaser23",email = "qflcpt@protonmail.com"}
 ]
-license = {text = "+"}
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
