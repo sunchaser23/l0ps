@@ -168,8 +168,8 @@ def distribute(config, blocksinfo, balances, leases_x_id):
                     # WAVES rewards
                     ############################################
 
-                    fees = int(payments[address]['waves']['share'] * blockfees)
-                    rewards = int(payments[address]['waves']['share'] * blockrewards)
+                    fees = int(payments[address]['waves']['share'] * leasersblockfees)
+                    rewards = int(payments[address]['waves']['share'] * leasersblockrewards)
                     payments[address]['waves']['reward'] += max(0, fees + rewards)
                     logger.debug(f"{address} fees: {fees}, rewards: {rewards}")
 
