@@ -6,9 +6,9 @@ authors = [
     {name = "Sunchaser23",email = "qflcpt@protonmail.com"}
 ]
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.8,<4.0"
 dependencies = [
-    "pywaves-CE",
+    "pywaves-ce (==2.0.1)",
 ]
 
 [build-system]

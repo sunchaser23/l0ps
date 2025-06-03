@@ -1,10 +1,7 @@
 import sys
-import json
-import requests
 import pywaves as pw
-import logging
-import os
 import libs
+import logging
 
 def main():
     if len(sys.argv) != 1:
@@ -19,7 +16,17 @@ def main():
     logger.info(f"Operating from address: {addr.address}");
 
     dappaddr = pw.address.Address(config['waves']['claimwavesdaolpdappaddress'])
-    addr.invokeScript(dappaddr.address, 'processBlocks')
+    tx = addr.invokeScript(dappaddr.address, 'processBlocks')
+    if ('error' in tx):
+        logger.error(f"Error: {tx['message']}")
+    else:
+        pw.waitFor(tx['id'])
 
+    tx = addr.invokeScript(dappaddr.address, 'claimLP')    
+    if ('error' in tx):
+        logger.error(f"Error: {tx['message']}")
+    else:
+        pw.waitFor(tx['id'])
+        
 if __name__ == "__main__":
     main()
