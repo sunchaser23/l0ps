@@ -247,7 +247,7 @@ def main():
     logger = libs.setup_logger(log_file="l0ps.log", log_level=logging.DEBUG, name="blocks")
 
     if len(sys.argv) < 1:
-        print("Usage: python3 blocks [startblock] [endblock]")
+        print("Usage: poetry run python blocks [startblock] [endblock]")
         sys.exit(1)
 
     startblock = None

@@ -171,7 +171,7 @@ def main():
 
 
     if len(sys.argv) != 2:
-        print("Usage: python sendpayments.py [dryrun: Y|N]")
+        print("Usage: poetry run python sendpayments.py [dryrun: Y|N]")
         sys.exit(1)
 
     dryrun = sys.argv[1]

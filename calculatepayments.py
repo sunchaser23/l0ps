@@ -290,7 +290,7 @@ def main():
     global logger
 
     if len(sys.argv) != 2:
-        print("Usage: python calculatepayments.py [dryrun Y!N]")
+        print("Usage: poetry run python calculatepayments.py [dryrun Y|N]")
         sys.exit(1)
 
     logger = libs.setup_logger(log_file="l0ps.log", log_level=logging.DEBUG, name="calculatepayments")

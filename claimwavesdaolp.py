@@ -8,7 +8,7 @@ import libs
 
 def main():
     if len(sys.argv) != 1:
-        print("Usage: python waves_claimwavesdaolp.py")
+        print("Usage: poetry run python waves_claimwavesdaolp.py")
         sys.exit(1)
 
     config = libs.load_config_from_file('config.json')
