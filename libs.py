@@ -46,12 +46,10 @@ def setup_logger(log_file="app.log", log_level=logging.INFO, name=__name__):
     # Create a formatter
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     file_handler.setFormatter(formatter)
-    console_handler.setFormatter(formatter)
-
+    
     # Add handlers to the logger
     logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
-
+    
     return logger
 
 def wrapper(host, api, postData='', headers=''):

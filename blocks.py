@@ -76,29 +76,31 @@ def getallblocks(conn, startblock, endblock):
         extended_map.update({tx['id']: tx for tx in extended_transactions})
 
         # Process blocks and transactions
-        for block in currentblocks:
-            for transaction in block['transactions']:
+        cursor = conn.cursor()
+        for block in currentblocks:            
+            total_tx16calls = 0
+            for transaction in block['transactions']:                
                 if transaction['type'] in (8, 9, 16, 18):
                     extended_tx = extended_map.get(transaction['id'])
-                    checkandsave_leasetransaction(conn, block, transaction, extended_tx)
+                    tx16calls = checkandsave_leasetransaction(conn, block, transaction, extended_tx)
+                    total_tx16calls += tx16calls
                 else:
                     pass
-        # Saving blocks
-        logger.debug(f"Saving Block Data")
-        cursor = conn.cursor()
-        for block in currentblocks:
+            # save block data
             sql = f"""
-                REPLACE INTO waves_blocks ( height, generator, fees, txs, timestamp )
+                REPLACE INTO waves_blocks ( height, generator, fees, txs, timestamp, tx16calls)
                 VALUES (
                     {block['height']},
                     '{block['generator']}',
                     {block['totalFee'] },
                     {len(block['transactions'])},
-                    {block['timestamp'] // 1000}
+                    {block['timestamp'] // 1000},
+                    {total_tx16calls}
                 )"""
-            cursor.execute(sql)
+            
+            cursor.execute(sql)    
         cursor.close()
-
+        
         if _startblock + steps < _endblock:
             _startblock += steps
         else:
@@ -118,6 +120,8 @@ def checkandsave_leasetransaction(conn, block, transaction, extendedtransaction)
     """
 
     global config, logger
+        
+    tx16calls = 0
 
     if ('type' in transaction and transaction['type'] == 8 and (
         transaction['recipient'] == config['waves']['generatoraddress']
@@ -160,6 +164,10 @@ def checkandsave_leasetransaction(conn, block, transaction, extendedtransaction)
     elif 'type' in transaction and (transaction['type'] == 16 or transaction['type'] == 18):
         leases = []
         leasecancels = []
+        
+        # update tx16 counter where sender is generator address
+        if transaction['sender'] == config['waves']['generatoraddress']:
+            tx16calls = tx16calls + 1            
 
         # Check recursively invokes for leases and lease cancels
         # logger.info(f"Analyzing tx {transaction['id']} type {transaction['type']}")
@@ -219,6 +227,8 @@ def checkandsave_leasetransaction(conn, block, transaction, extendedtransaction)
                     logger.debug(f"Block: {extendedtransaction['height']}: Found a lease cancellation... id: {leasecancel['id']}")
             except sqlite3.Error as e:
                 logger.error(f"Error updating lease cancellation: {e}")
+    
+    return tx16calls
 
 def analyzestatechanges(statechanges, leases, leasecancels):
     """
