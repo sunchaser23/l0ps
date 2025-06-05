@@ -7,6 +7,7 @@ import os
 import libs
 import sqlite3
 import decimal
+from pprint import pprint
 
 def pay(config, conn, addr, dryrun):
 
@@ -52,7 +53,6 @@ def pay(config, conn, addr, dryrun):
         rset = cursor.fetchall()
 
         recipients = {}
-        fees = 1
         totalpayments = 0
 
         for row in rset:
@@ -69,27 +69,26 @@ def pay(config, conn, addr, dryrun):
             recipients[token]['payments'] += 1
             recipients[token]['recipients'][address] = amount
 
-            fees += 0.001
             totalpayments += 1
-
-        fees = round(fees,3) * (10 ** 8)
-
+       
         # check if there is enough balance
 
         balances = libs.get_balances(config, addr)
         logger.info(f"Total Payments: {totalpayments}")
-        logger.info(f"Needed Fees: (safe) {int(fees)/(10**8)}")
         logger.info(f"Node Balance: {int(balances['waves']['balance']/(10**8))} $WAVES")
 
-        if balances['waves']['balance'] < recipients['waves']['total'] + fees:
-            logger.error(f"Not enough WAVES balance: {balances['waves']['balance']/(10**8):.8f} vs {(recipients['waves']['total']+fees)/(10**8):.8f}")
+        if balances['waves']['balance'] < recipients['waves']['total']:
+            logger.error(f"Not enough WAVES balance: {balances['waves']['balance']/(10**8):.8f} vs {(recipients['waves']['total'])/(10**8):.8f}")
             return False
-
-        for token, details in config['waves']['airdrops'].items():
-            if details['enabled']:
-                if balances[token]['balance'] < recipients[token]['total']:
-                    logger.error(f"Not enough {token} balance: {balances[token]['balance']/(10**balances[token]['decimals']):.8f} vs {(recipients[token]['total']+fees)/(10**balances[token]['decimals']):.8f}")
-                    return False
+        
+        for token, details in recipients.items():
+            if token not in balances:
+                logger.error(f"Token {token} not found in balances")
+                return False
+                
+            if balances[token]['balance'] < details['total']:
+                logger.error(f"Not enough {token} balance: {balances[token]['balance']/(10**balances[token]['decimals']):.8f} vs {details['total']/(10**balances[token]['decimals']):.8f}")
+                return False
 
         # Pay
 
@@ -187,7 +186,10 @@ def main():
 
     rc = pay(config, conn, addr, dryrun)
     if (rc):
-        logger.info("Payment has been succesfully completed.")
+        if (dryrun=='N'):
+            logger.info("Payment has been succesfully completed.")
+        else:
+            logger.info("Dryrun mode, payments not sent.")
     else:
         logger.info("Some errors occurred while paying, check blockchain and update database accordingly.")
 

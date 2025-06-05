@@ -6,7 +6,7 @@ import logging
 import libs
 import sqlite3
 import datetime
-
+from pprint import pprint
 
 def savepayments(config, conn, payments, blocksinfo, totals, dryrun):
     global logger
@@ -45,7 +45,7 @@ def getwavesactiveleasesatblock(height, leases_x_id):
         'leases': {},
         'total': 0
     }
-    logger.debug(f"Block height: {height}")
+    # logger.debug(f"Block height: {height}")
     # Collect leases within the window of interest (last 1000 blocks)
     lower_bound = height - 1000
     grouped_by_address = {}
@@ -55,7 +55,7 @@ def getwavesactiveleasesatblock(height, leases_x_id):
         start = lease[4]
         end = lease[7] if lease[7] is not None else float('inf')
         amount = lease[8]
-        logger.debug(f"lease: {lease}, address: {address}, start: {start}, end: {end}, amount: {amount}")
+        # logger.debug(f"lease: {lease}, address: {address}, start: {start}, end: {end}, amount: {amount}")
         # Check if lease fully cover [lower_bound, height]
         if start < lower_bound and height < end:
 
@@ -105,10 +105,9 @@ def getwavesactiveleasesatblock(height, leases_x_id):
                 activeleasesinfo['leases'][address] += min_amount
             activeleasesinfo['total'] += min_amount
 
-    logger.debug(f"{activeleasesinfo}")
+    # logger.debug(f"{activeleasesinfo}")
 
     return activeleasesinfo
-
 
 def distribute(config, blocksinfo, balances, leases_x_id):
     airdroprewards = {}
@@ -134,6 +133,11 @@ def distribute(config, blocksinfo, balances, leases_x_id):
     res = libs.blockchainrewards(config['waves']['node'])
     blockrewards = res['currentReward'] / 3
 
+    logger.debug(f"Nodedebt: {blocksinfo['nodetx16debt']/10**8}")
+
+    blocknodedebt = blocksinfo['nodetx16debt'] / blocksinfo['minedblocks']
+    logger.debug(f"Block nodedebt: {blocknodedebt/10**8}")
+
     for height, blockinfo in blocksinfo['blocks'].items():
         if blockinfo[1] != config['waves']['generatoraddress']:
             pass
@@ -142,11 +146,14 @@ def distribute(config, blocksinfo, balances, leases_x_id):
             blockfees = previousblockinfo[2] * 0.6 + blockinfo[2] * 0.4
             leasersblockfees = (blockfees * int(config['waves']['percentagetodistribute']) / 100)
             leasersblockrewards = (blockrewards * int(config['waves']['percentagetodistribute']) / 100)
+            leasersblocknodedebt = blocknodedebt * int(config['waves']['percentagetodistribute']) / 100
+
             nodeownerblockfees = blockfees - leasersblockfees
             nodeownerblockrewards = blockrewards - leasersblockrewards
-
-            logger.debug(f"Block: {height}, leasers fees: {leasersblockfees}, leasers blockreward: {leasersblockrewards}")
-            logger.debug(f"Block: {height}, nodeowner fees: {nodeownerblockfees}, nodeowner blockreward: {nodeownerblockrewards}")
+            nodeownerblocknodedebt = blocknodedebt - leasersblocknodedebt
+            logger.debug("--------------------------------")
+            logger.debug(f"Block: {height}, leasers fees: {leasersblockfees}, leasers blockreward: {leasersblockrewards}, leasers blocknodedebt: {leasersblocknodedebt}")
+            logger.debug(f"Block: {height}, nodeowner fees: {nodeownerblockfees}, nodeowner blockreward: {nodeownerblockrewards}, nodeowner blocknodedebt: {nodeownerblocknodedebt}")            
 
             # find active leases for this block
             activeleasesatthisblock = getwavesactiveleasesatblock(height, leases_x_id)
@@ -170,8 +177,10 @@ def distribute(config, blocksinfo, balances, leases_x_id):
 
                     fees = int(payments[address]['waves']['share'] * leasersblockfees)
                     rewards = int(payments[address]['waves']['share'] * leasersblockrewards)
-                    payments[address]['waves']['reward'] += max(0, fees + rewards)
-                    logger.debug(f"{address} fees: {fees}, rewards: {rewards}")
+                    debt = int(payments[address]['waves']['share'] * leasersblocknodedebt) 
+
+                    payments[address]['waves']['reward'] += max(0, fees + rewards - debt)
+                    logger.debug(f"{address} share: {payments[address]['waves']['share']}, fees: {fees}, rewards: {rewards}, debt: {debt}, total: {fees + rewards - debt}")
 
                     ############################################
                     # AIRDROPS rewards
@@ -270,16 +279,19 @@ def loadblocksinfo(config, conn):
         blocksinfo['blocks'] = {}
         minedblocks = 0
 
+        nodetx16debt = 0
         for row in blocks_data:
             height = row[0]
             blocksinfo['blocks'][height] = row
             if row[1] == config['waves']['generatoraddress']:
                 minedblocks += 1
+            nodetx16debt += row[6] 
 
         blocksinfo['minedblocks'] = minedblocks
         blocksinfo['startblock'] = startblock
         blocksinfo['endblock'] = endblock
-
+        blocksinfo['nodetx16debt'] = nodetx16debt * 0.005 * 10 ** 8
+        
         return blocksinfo
 
     except sqlite3.Error as e:
@@ -337,9 +349,24 @@ def main():
     payments = {}
     payments = distribute(config, blocksinfo, balances, leases_x_id)
 
-    # compute fees and check node balance
-    fees = 1  # 1 WAVES for safety
+    
+    # foreach payments, remove sending fees
+    for address, tokens in list(payments.items()):
+        for token, paymentdetails in list(tokens.items()):
+            if paymentdetails['reward'] <= 0:
+                del tokens[token]
+        if not tokens:
+            del payments[address]
+
+    for address, tokens in payments.items():
+        if 'waves' in tokens:
+            n = len(tokens)
+            tokens['waves']['reward'] = max(0, tokens['waves']['reward'] - (0.001 * 10 ** 8 * n))
+
+    # check node balance
     totals = {}
+    
+    logger.debug("-------------------- Payments --------------------")
     for address, tokens in payments.items():
         if (address == config['waves']['nodeownerbeneficiaryaddress']):
             line = f"{address} (node owner),"
@@ -354,27 +381,27 @@ def main():
                 line += f"{token}:{paymentdetails['reward'] / 10 ** 8:.8f},share:{paymentdetails['share'] * 100:.2f}%,"
             else:
                 line += f"{token}:{paymentdetails['reward'] / 10 ** config['waves']['airdrops'][token]['decimals']:.8f},"
-            fees += 0.001
         logger.debug(line)
-
-    fees = round(fees, 3) * 10 ** 8
-    totalwavesneeded = int(totals['waves'] + fees)
+    logger.debug("--------------------------------")
+    totalwavesneeded = int(totals['waves'])
     for token, amount in totals.items():
         if token == 'waves':
             logger.info(f"Total {token} to be sent: {amount / 10 ** 8:.8f}")
         else:
             logger.info(f"Total {token} to be sent: {amount / 10 ** config['waves']['airdrops'][token]['decimals']:.8f}")
-    logger.info(f"Total fees: {fees / (10 ** 8)} WAVES")
+
     logger.info(f"Node Balance: {balances['waves']['balance'] / 10 ** 8} WAVES")
     logger.info(f"Total waves needed: {totalwavesneeded / 10 ** 8}")
-    if (fees + totals['waves']) > balances['waves']['balance']:
+    if (totals['waves']) > balances['waves']['balance']:
         logger.info(f"Node debt: {(balances['waves']['balance'] - totalwavesneeded) / 10 ** 8}")
         exit("ERROR: Not enough balance: add waves to node balance, exiting.")
         logger.error("(Not enough balance: add waves to node balance, exiting.")
 
     savepayments(config, conn, payments, blocksinfo, totals, dryrun)
-    logger.info("Calculated payments, you can now launch sendpayments.")
-
+    if (dryrun == 'N'):
+        logger.info("Calculated payments, you can now launch sendpayments.")
+    else:
+        logger.info("Calculated payments, no payments were saved.")
 
 if __name__ == "__main__":
     main()
