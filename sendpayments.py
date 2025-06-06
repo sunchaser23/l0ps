@@ -170,9 +170,10 @@ def main():
 
     if len(sys.argv) != 2:
         print("Usage: poetry run python sendpayments.py [dryrun: Y|N]")
-        
+        sys.exit(1)
+
     global logger
-    sys.exit(1)
+
     try:
 
         dryrun = sys.argv[1]
