@@ -54,11 +54,12 @@ def setup_logger(log_file="app.log", log_level=logging.INFO, name=__name__):
     return logger
 
 def wrapper(host, api, postData='', headers=''):
+
+    if postData:
+        req = requests.post('%s%s' % (host, api), data=postData, headers={'content-type': 'application/json'}, timeout=30)
+    else:
+        req = requests.get('%s%s' % (host, api), headers=headers, timeout=30)
     try:
-        if postData:
-            req = requests.post('%s%s' % (host, api), data=postData, headers={'content-type': 'application/json'})
-        else:
-            req = requests.get('%s%s' % (host, api), headers=headers)
         return req.json()
     except json.JSONDecodeError as e:
         print(f"> JSON Decode error: {e}")

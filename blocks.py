@@ -6,6 +6,7 @@ import libs
 import logging
 import traceback
 import json
+import urllib3
 
 def getallblocks(conn, startblock, endblock):
     """
@@ -47,13 +48,13 @@ def getallblocks(conn, startblock, endblock):
                 try:
                     res = libs.wrapper(config['waves']['node'], '/blocks/seq/%d/%d' % (_startblock, _startblock + (steps - 1)))
                     break
-                except (urllib3.exceptions.IncompleteRead, urllib3.exceptions.ProtocolError) as e:
+                except Exception as e:
                     retry_count += 1
                     if retry_count == max_retries:
                         logger.error(f"Failed to fetch blocks after {max_retries} attempts: {str(e)}")
                         raise
                     logger.warning(f"Error fetching blocks (attempt {retry_count}/{max_retries}): {str(e)}")
-                    time.sleep(5)  # Wait before retrying            
+                    time.sleep(10)  # Wait before retrying            
             if res is not False:
                 currentblocks = res
             else:
@@ -66,8 +67,13 @@ def getallblocks(conn, startblock, endblock):
                 try:
                     res = libs.wrapper(config['waves']['node'], '/blocks/seq/%d/%d' % (_startblock, _endblock))
                     break
-                except (urllib3.exceptions.IncompleteRead, urllib3.exceptions.ProtocolError) as e:
+                except Exception as e:
                     retry_count += 1
+                    if retry_count == max_retries:
+                        logger.error(f"Failed to fetch blocks after {max_retries} attempts: {str(e)}")
+                        raise
+                    logger.warning(f"Error fetching blocks (attempt {retry_count}/{max_retries}): {str(e)}")
+                    time.sleep(10)  # Wait before retrying            
             if res is not False:
                 currentblocks = res
             else:
@@ -183,12 +189,14 @@ def checkandsave_leasetransaction(conn, block, transaction, extendedtransaction)
         # Check recursively invokes for leases and lease cancels
         # logger.info(f"Analyzing tx {transaction['id']} type {transaction['type']}")
 
-        if transaction['type'] == 16:
+        '''
+	if transaction['type'] == 16:
             if 'stateChanges' in extendedtransaction and extendedtransaction['stateChanges'] is not None:
                 analyzestatechanges(extendedtransaction['stateChanges'], leases, leasecancels)
         elif transaction['type'] == 18:
             if 'stateChanges' in extendedtransaction['payload'] and extendedtransaction['payload']['stateChanges'] is not None:
                 analyzestatechanges(extendedtransaction['payload']['stateChanges'], leases, leasecancels)
+	'''
 
         #logger.info(f"Tx {extendedtransaction['id']} has {len(leases)} leases and {len(leasecancels)} lease cancels.")
 
