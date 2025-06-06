@@ -305,103 +305,113 @@ def main():
         print("Usage: poetry run python calculatepayments.py [dryrun Y|N]")
         sys.exit(1)
 
-    logger = libs.setup_logger(log_file="l0ps.log", log_level=logging.DEBUG, name="calculatepayments")
-    dryrun = sys.argv[1]
-    config = libs.load_config_from_file('config.json')
-    conn = sqlite3.connect(config['database'])  # Use the database filename from config
-    pw.setNode(config['waves']['node'], config['waves']['chain'])
-    addr = pw.address.Address(privateKey=config['waves']['pk'])
-    logger.info("---------------------------------------")
-    logger.info(f"Operating from address: {addr.address}")
+    try:
 
-    # Check if last payment had an error
-    cursor = conn.cursor()
-    cursor.execute("SELECT paymentlock FROM waves_payments ORDER BY id DESC LIMIT 1")
-    result = cursor.fetchone()
+        logger = libs.setup_logger(log_file="l0ps.log", log_level=logging.DEBUG, name="calculatepayments")
+        dryrun = sys.argv[1]
+        
+        config = libs.load_config_from_file('config.json')
+        conn = sqlite3.connect(config['database'])  # Use the database filename from config
+        pw.setNode(config['waves']['node'], config['waves']['chain'])
+        addr = pw.address.Address(privateKey=config['waves']['pk'])
+        
+        logger.info("---------------------------------------")
+        logger.info(f"Operating from address: {addr.address}")
 
-    if result:  # If there is at least one payment
-        payment_lock = result[0]
-        if payment_lock == 'Y':
-            logger.error("Error: Last payment is locked (paymentlock = 'Y').")
-            cursor.close()
-            conn.close()
+        # Check if last payment had an error
+        cursor = conn.cursor()
+        cursor.execute("SELECT paymentlock FROM waves_payments ORDER BY id DESC LIMIT 1")
+        result = cursor.fetchone()
+
+        if result:  # If there is at least one payment
+            payment_lock = result[0]
+            if payment_lock == 'Y':
+                logger.error("Error: Last payment is locked (paymentlock = 'Y').")
+                cursor.close()
+                conn.close()
+                sys.exit(1)
+
+        # Get node balances
+        balances = libs.get_balances(config, addr)
+
+        # Load info from blocks
+        blocksinfo = loadblocksinfo(config, conn)
+
+        logger.info(f"Start block: {blocksinfo['startblock']}")
+        logger.info(f"End block: {blocksinfo['endblock']}")
+        logger.info(f"Mined blocks: {blocksinfo['minedblocks']}")
+        logger.info(f"Percentage distributed: {config['waves']['percentagetodistribute']}%");
+
+        if blocksinfo['minedblocks'] == 0:
+            logger.warning(f"No blocks were mined, exiting.")
             sys.exit(1)
 
-    # Get node balances
-    balances = libs.get_balances(config, addr)
+        # Load leases info
+        leases_x_block, leases_x_id = getleasesinfo(config, conn)
 
-    # Load info from blocks
-    blocksinfo = loadblocksinfo(config, conn)
+        # distribute payments
+        payments = {}
+        payments = distribute(config, blocksinfo, balances, leases_x_id)
+        
+        # foreach payments, remove entries with amount 0 and removesending fees
+        for address, tokens in list(payments.items()):
+            for token, paymentdetails in list(tokens.items()):
+                if paymentdetails['reward'] <= 0:
+                    del tokens[token]
+            if not tokens:
+                del payments[address]
 
-    logger.info(f"Start block: {blocksinfo['startblock']}")
-    logger.info(f"End block: {blocksinfo['endblock']}")
-    logger.info(f"Mined blocks: {blocksinfo['minedblocks']}")
-    logger.info(f"Percentage distributed: {config['waves']['percentagetodistribute']}%");
+        for address, tokens in payments.items():
+            if 'waves' in tokens:
+                n = len(tokens)
+                tokens['waves']['reward'] = max(0, tokens['waves']['reward'] - (0.001 * 10 ** 8 * n))
 
-    if blocksinfo['minedblocks'] == 0:
-        logger.warning(f"No blocks were mined, exiting.")
+        # check node balance vs amount to be sent
+        totals = {}
+        
+        logger.debug("-------------------- Payments --------------------")
+        for address, tokens in payments.items():
+            if (address == config['waves']['nodeownerbeneficiaryaddress']):
+                line = f"{address} (node owner),"
+            else:
+                line = f"{address},"
+            for token, paymentdetails in tokens.items():
+                if token in totals:
+                    totals[token] += int(paymentdetails['reward'])
+                else:
+                    totals[token] = int(paymentdetails['reward'])
+                if (token == 'waves'):
+                    line += f"{token}:{paymentdetails['reward'] / 10 ** 8:.8f},share:{paymentdetails['share'] * 100:.2f}%,"
+                else:
+                    line += f"{token}:{paymentdetails['reward'] / 10 ** config['waves']['airdrops'][token]['decimals']:.8f},"
+            logger.debug(line)
+        logger.debug("--------------------------------")
+
+        totalwavesneeded = int(totals['waves'])
+        for token, amount in totals.items():
+            if token == 'waves':
+                logger.info(f"Total {token} to be sent: {amount / 10 ** 8:.8f}")
+            else:
+                logger.info(f"Total {token} to be sent: {amount / 10 ** config['waves']['airdrops'][token]['decimals']:.8f}")
+
+        logger.info(f"Node Balance: {balances['waves']['balance'] / 10 ** 8} WAVES")
+        logger.info(f"Total waves needed: {totalwavesneeded / 10 ** 8}")
+        
+        if (totals['waves']) > balances['waves']['balance']:
+            logger.info(f"Node debt: {(balances['waves']['balance'] - totalwavesneeded) / 10 ** 8}")
+            logger.error("Not enough balance: add waves to node balance, exiting.")
+            sys.exit(1)
+            
+        savepayments(config, conn, payments, blocksinfo, totals, dryrun)
+        if (dryrun == 'N'):
+            logger.info("Calculated payments, you can now launch sendpayments.")
+        else:
+            logger.info("Calculated payments, no payments were saved.")
+            
+    except Exception as e:
+        logger.error(f"Error: {e}")
+        logger.error(traceback.format_exc())
         sys.exit(1)
-
-    # Load leases info
-    leases_x_block, leases_x_id = getleasesinfo(config, conn)
-
-    # distribute payments
-    payments = {}
-    payments = distribute(config, blocksinfo, balances, leases_x_id)
-
-    
-    # foreach payments, remove sending fees
-    for address, tokens in list(payments.items()):
-        for token, paymentdetails in list(tokens.items()):
-            if paymentdetails['reward'] <= 0:
-                del tokens[token]
-        if not tokens:
-            del payments[address]
-
-    for address, tokens in payments.items():
-        if 'waves' in tokens:
-            n = len(tokens)
-            tokens['waves']['reward'] = max(0, tokens['waves']['reward'] - (0.001 * 10 ** 8 * n))
-
-    # check node balance
-    totals = {}
-    
-    logger.debug("-------------------- Payments --------------------")
-    for address, tokens in payments.items():
-        if (address == config['waves']['nodeownerbeneficiaryaddress']):
-            line = f"{address} (node owner),"
-        else:
-            line = f"{address},"
-        for token, paymentdetails in tokens.items():
-            if token in totals:
-                totals[token] += int(paymentdetails['reward'])
-            else:
-                totals[token] = int(paymentdetails['reward'])
-            if (token == 'waves'):
-                line += f"{token}:{paymentdetails['reward'] / 10 ** 8:.8f},share:{paymentdetails['share'] * 100:.2f}%,"
-            else:
-                line += f"{token}:{paymentdetails['reward'] / 10 ** config['waves']['airdrops'][token]['decimals']:.8f},"
-        logger.debug(line)
-    logger.debug("--------------------------------")
-    totalwavesneeded = int(totals['waves'])
-    for token, amount in totals.items():
-        if token == 'waves':
-            logger.info(f"Total {token} to be sent: {amount / 10 ** 8:.8f}")
-        else:
-            logger.info(f"Total {token} to be sent: {amount / 10 ** config['waves']['airdrops'][token]['decimals']:.8f}")
-
-    logger.info(f"Node Balance: {balances['waves']['balance'] / 10 ** 8} WAVES")
-    logger.info(f"Total waves needed: {totalwavesneeded / 10 ** 8}")
-    if (totals['waves']) > balances['waves']['balance']:
-        logger.info(f"Node debt: {(balances['waves']['balance'] - totalwavesneeded) / 10 ** 8}")
-        exit("ERROR: Not enough balance: add waves to node balance, exiting.")
-        logger.error("(Not enough balance: add waves to node balance, exiting.")
-
-    savepayments(config, conn, payments, blocksinfo, totals, dryrun)
-    if (dryrun == 'N'):
-        logger.info("Calculated payments, you can now launch sendpayments.")
-    else:
-        logger.info("Calculated payments, no payments were saved.")
 
 if __name__ == "__main__":
     main()

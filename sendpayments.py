@@ -168,30 +168,35 @@ def masspay(config, token, token_id, batch, addr, dryrun):
 
 def main():
 
-
     if len(sys.argv) != 2:
         print("Usage: poetry run python sendpayments.py [dryrun: Y|N]")
-        sys.exit(1)
-
-    dryrun = sys.argv[1]
-
+        
     global logger
+    sys.exit(1)
+    try:
 
-    config = libs.load_config_from_file('config.json')
-    logger = libs.setup_logger(log_file="l0ps.log", log_level=logging.DEBUG, name="sendpayments")
-    conn = sqlite3.connect(config['database'])
-    pw.setNode(config['waves']['node'], config['waves']['chain']);
-    addr = pw.address.Address(privateKey=config['waves']['pk'])
-    logger.info(f"Operating from address {addr.address}")
+        dryrun = sys.argv[1]
+        
+        config = libs.load_config_from_file('config.json')
+        logger = libs.setup_logger(log_file="l0ps.log", log_level=logging.DEBUG, name="sendpayments")
+        conn = sqlite3.connect(config['database'])
+        pw.setNode(config['waves']['node'], config['waves']['chain']);
+        addr = pw.address.Address(privateKey=config['waves']['pk'])
+        logger.info(f"Operating from address {addr.address}")
 
-    rc = pay(config, conn, addr, dryrun)
-    if (rc):
-        if (dryrun=='N'):
-            logger.info("Payment has been succesfully completed.")
+        rc = pay(config, conn, addr, dryrun)
+        if (rc):
+            if (dryrun=='N'):
+                logger.info("Payment has been succesfully completed.")
+            else:
+                logger.info("Dryrun mode, payments not sent.")
         else:
-            logger.info("Dryrun mode, payments not sent.")
-    else:
-        logger.info("Some errors occurred while paying, check blockchain and update database accordingly.")
+                logger.info("Some errors occurred while paying, check blockchain and update database accordingly.")
+
+    except Exception as e:        
+        logger.error(f"Error: {e}")
+        logger.error(traceback.format_exc())
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
