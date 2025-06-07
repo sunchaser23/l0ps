@@ -12,11 +12,13 @@
 		"unit0": {
 			"assetid": "D...6",
 			"enabled": true,
+			"minamount": 100000000, 
 			"decimals": 8
      	},
 		"wavesdaolp": {
 			"assetid": "m...M",
 			"enabled": true,
+			"minamount": 100000000, 
 			"decimals": 8
      	}
    }
