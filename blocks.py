@@ -7,13 +7,29 @@ import logging
 import traceback
 import json
 import urllib3
+from typing import Optional, List, Dict, Any
 
-def getallblocks(conn, startblock, endblock):
-    """
-    Get blocks from startblock to endblock
-    Analyse leases, unleases, rewards
-    """
+TRANSACTION_TYPES = {
+    'LEASE': 8,
+    'LEASE_CANCEL': 9,
+    'INVOKE': 16,
+    'INVOKE_SCRIPT': 18
+}
 
+def getallblocks(conn: sqlite3.Connection, startblock: Optional[int], endblock: Optional[int]) -> None:
+    """
+    Get blocks from startblock to endblock and analyze leases, unleases, and rewards.
+    
+    Args:
+        conn: SQLite database connection
+        startblock: Starting block height (inclusive)
+        endblock: Ending block height (inclusive)
+        
+    Raises:
+        sqlite3.Error: If database operations fail
+        Exception: If API calls fail
+    """
+        
     global config, logger
     height = libs.height(config['waves']['node'])
     logger.info(f"Height: {height}")
@@ -42,39 +58,15 @@ def getallblocks(conn, startblock, endblock):
         currentblocks = []
         if _startblock + (steps - 1) < _endblock:
             logger.info("Getting blocks from %d to %d" % ( _startblock, _startblock + (steps - 1)))                        
-            max_retries = 3
-            retry_count = 0
-            while retry_count < max_retries:
-                try:
-                    res = libs.wrapper(config['waves']['node'], '/blocks/seq/%d/%d' % (_startblock, _startblock + (steps - 1)))
-                    break
-                except Exception as e:
-                    retry_count += 1
-                    if retry_count == max_retries:
-                        logger.error(f"Failed to fetch blocks after {max_retries} attempts: {str(e)}")
-                        raise
-                    logger.warning(f"Error fetching blocks (attempt {retry_count}/{max_retries}): {str(e)}")
-                    time.sleep(10)  # Wait before retrying            
-            if res is not False:
+            res = libs.wrapper(config['waves']['node'], '/blocks/seq/%d/%d' % (_startblock, _startblock + (steps - 1)))
+            if res is not None:
                 currentblocks = res
             else:
                 raise Exception('CURL error while fetching blocks.')
         else:
             logger.info("Getting blocks from %d to %d" % ( _startblock, _endblock))
-            max_retries = 3
-            retry_count = 0
-            while retry_count < max_retries:
-                try:
-                    res = libs.wrapper(config['waves']['node'], '/blocks/seq/%d/%d' % (_startblock, _endblock))
-                    break
-                except Exception as e:
-                    retry_count += 1
-                    if retry_count == max_retries:
-                        logger.error(f"Failed to fetch blocks after {max_retries} attempts: {str(e)}")
-                        raise
-                    logger.warning(f"Error fetching blocks (attempt {retry_count}/{max_retries}): {str(e)}")
-                    time.sleep(10)  # Wait before retrying            
-            if res is not False:
+            res = libs.wrapper(config['waves']['node'], '/blocks/seq/%d/%d' % (_startblock, _endblock))
+            if res is not None:
                 currentblocks = res
             else:
                 raise Exception('CURL error while fetching blocks.')
@@ -84,7 +76,11 @@ def getallblocks(conn, startblock, endblock):
         # Collect all relevant transaction ids from all currentblocks
         tx_ids = []
         for block in currentblocks:
-            tx_ids.extend([tx['id'] for tx in block['transactions'] if tx['type'] in (9, 16, 18)])
+            tx_ids.extend([tx['id'] for tx in block['transactions'] if tx['type'] in (
+                TRANSACTION_TYPES['LEASE_CANCEL'],
+                TRANSACTION_TYPES['INVOKE'],
+                TRANSACTION_TYPES['INVOKE_SCRIPT']
+            )])
 
         # Fetch extended tx info
         extended_map = {}
@@ -97,12 +93,15 @@ def getallblocks(conn, startblock, endblock):
         for block in currentblocks:            
             total_tx16calls = 0
             for transaction in block['transactions']:                
-                if transaction['type'] in (8, 9, 16, 18):
+                if transaction['type'] in (
+                    TRANSACTION_TYPES['LEASE'],
+                    TRANSACTION_TYPES['LEASE_CANCEL'],
+                    TRANSACTION_TYPES['INVOKE'],
+                    TRANSACTION_TYPES['INVOKE_SCRIPT']
+                ):
                     extended_tx = extended_map.get(transaction['id'])
                     tx16calls = checkandsave_leasetransaction(conn, block, transaction, extended_tx)
                     total_tx16calls += tx16calls
-                else:
-                    pass
             # save block data
             sql = f"""
                 REPLACE INTO waves_blocks ( height, generator, fees, txs, timestamp, tx16calls)
@@ -124,13 +123,15 @@ def getallblocks(conn, startblock, endblock):
             _startblock = _endblock
 
         totalsavedblocks += len(currentblocks)
-
-
         logger.info(f"Total Blocks Loaded: {totalsavedblocks}, committing...")
-        conn.commit()
-
+        try:
+            with conn:  # This ensures proper transaction handling
+                conn.commit()
+        except sqlite3.Error as e:
+            logger.error(f"Database error: {e}")
+            raise
         time.sleep(1)
-
+        
 def checkandsave_leasetransaction(conn, block, transaction, extendedtransaction):
     """
     Check block for lease and unleases
@@ -140,7 +141,7 @@ def checkandsave_leasetransaction(conn, block, transaction, extendedtransaction)
         
     tx16calls = 0
 
-    if ('type' in transaction and transaction['type'] == 8 and (
+    if ('type' in transaction and transaction['type'] == TRANSACTION_TYPES['LEASE'] and (
         transaction['recipient'] == config['waves']['generatoraddress']
         or transaction['recipient'] == "address:" + config['waves']['generatoraddress']
         or transaction['recipient'] == "alias:W:" + config['waves']['generatoralias']
@@ -164,7 +165,7 @@ def checkandsave_leasetransaction(conn, block, transaction, extendedtransaction)
             ),
         )
         cursor.close()
-    elif 'type' in transaction and transaction['type'] == 9:
+    elif 'type' in transaction and transaction['type'] == TRANSACTION_TYPES['LEASE_CANCEL']:
         if extendedtransaction['lease']['recipient'] == config['waves']['generatoraddress']:
             cursor = conn.cursor()
             sql = f"""
@@ -178,7 +179,8 @@ def checkandsave_leasetransaction(conn, block, transaction, extendedtransaction)
                 logger.debug(f"Block: {extendedtransaction['height']}: Found a lease cancellation,... id: {extendedtransaction['leaseId']}")
             cursor.close()
 
-    elif 'type' in transaction and (transaction['type'] == 16 or transaction['type'] == 18):
+    elif 'type' in transaction and (transaction['type'] == TRANSACTION_TYPES['INVOKE'] or 
+                                  transaction['type'] == TRANSACTION_TYPES['INVOKE_SCRIPT']):
         leases = []
         leasecancels = []
         
@@ -189,15 +191,13 @@ def checkandsave_leasetransaction(conn, block, transaction, extendedtransaction)
         # Check recursively invokes for leases and lease cancels
         # logger.info(f"Analyzing tx {transaction['id']} type {transaction['type']}")
 
-        '''
-	if transaction['type'] == 16:
+        if transaction['type'] == TRANSACTION_TYPES['INVOKE']:
             if 'stateChanges' in extendedtransaction and extendedtransaction['stateChanges'] is not None:
                 analyzestatechanges(extendedtransaction['stateChanges'], leases, leasecancels)
-        elif transaction['type'] == 18:
+        elif transaction['type'] == TRANSACTION_TYPES['INVOKE_SCRIPT']:
             if 'stateChanges' in extendedtransaction['payload'] and extendedtransaction['payload']['stateChanges'] is not None:
                 analyzestatechanges(extendedtransaction['payload']['stateChanges'], leases, leasecancels)
-	'''
-
+	  
         #logger.info(f"Tx {extendedtransaction['id']} has {len(leases)} leases and {len(leasecancels)} lease cancels.")
 
         # Save leases
@@ -272,7 +272,6 @@ logger = None
 def main():
 
     global config, logger
-
     logger = libs.setup_logger(log_file="l0ps.log", log_level=logging.DEBUG, name="blocks")
 
     if len(sys.argv) < 1:
@@ -299,11 +298,18 @@ def main():
         config = libs.load_config_from_file('config.json')
         conn = sqlite3.connect(config['database'])  
         logger.info("Loading Blocks");
+        validate_block_range(startblock, endblock)
         getallblocks(conn, startblock, endblock)
     except Exception as e:
         logger.debug("Error: %s", e)
         logger.error(traceback.format_exc())
         sys.exit(1)
+
+def validate_block_range(startblock, endblock):
+    if startblock is not None and startblock < 1:
+        raise ValueError("Start block must be greater than 0")
+    if endblock is not None and endblock < startblock:
+        raise ValueError("End block must be greater than start block")
 
 if __name__ == "__main__":
     main()

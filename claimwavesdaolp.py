@@ -2,6 +2,8 @@ import sys
 import pywaves as pw
 import libs
 import logging
+import traceback
+from pprint import pprint
 
 def main():
     if len(sys.argv) != 1:
@@ -25,7 +27,10 @@ try:
 
     tx = addr.invokeScript(dappaddr.address, 'claimLP')    
     if ('error' in tx):
-        raise Exception(f"Error: {tx['message']}")
+        if 'nothing to claim' in tx['message']:
+            logger.info("No LP to claim")
+        else:
+            raise Exception(f"Error: {tx['message']}")
     else:
         pw.waitFor(tx['id'])
 except Exception as e:
