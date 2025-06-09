@@ -7,6 +7,7 @@ import libs
 import sqlite3
 import datetime
 from pprint import pprint
+import traceback
 
 INVOKE_FEE = 0.005
 
@@ -297,25 +298,76 @@ def loadblocksinfo(config, conn):
         blocksinfo['endblock'] = endblock
         blocksinfo['tx16calls'] = tx16calls
         blocksinfo['nodetx16debt'] = tx16calls * INVOKE_FEE * 10 ** 8
-        logger.debug(f"Total tx16calls: {tx16calls}, debt: {blocksinfo['nodetx16debt']/10**8}")
         
         return blocksinfo
 
     except sqlite3.Error as e:
         logger.error(f"SQLite error: {e}")
 
+def swap_calculate_readonly(config, asset_from, asset_to, amount):
+    
+    data = {
+        "call": {
+            "function": "swapCalculateREADONLY",
+            "args": [
+                {"type": "integer", "value": int(amount)},
+                {"type": "string", "value": str(asset_from)},
+                {"type": "string", "value": str(asset_to)}
+            ]
+        }
+    }
+    try:
+                
+        headers = {'Content-Type': 'application/json'}
+   
+        r = requests.post(config['waves']['node'] + 'utils/script/evaluate/' + config['swap']['wx_contract_address'], data=json.dumps(data), headers=headers)
+        
+        r.raise_for_status()
+        result = r.json()     
+        if 'result' in result:
+            return result
+        else:
+            logger.error(f"Contract error: {json.dumps(result, indent=2)}")
+            return None
+    except Exception as e:
+        logger.error(f"WX_CALC_ERROR: {traceback.format_exc()}")
+        return None
+
+def swap_execute(config, asset_from, asset_to, amount, amount_out_min):
+    payment_asset = asset_from if asset_from != "WAVES" else None
+    try:
+        tx = my_address.invokeScript(
+            config['swap']['wx_contract_address'],
+            'swap',
+            [
+                {"type": "integer", "value": amount_out_min},
+                {"type": "string", "value": asset_to},
+                {"type": "string", "value": config['waves']['generatoraddress']}
+            ],
+            [{"assetId": payment_asset, "amount": amount}]
+        )
+        pw.waitFor(tx['id'])
+        return tx
+    except Exception as e:
+        logging.error(f"WX_SWAP_ERROR: {e}")
+        return None
+    if isinstance(tx, dict) and tx.get('error'):
+        print(f"WX swap error: {tx}")
+        return None
+
 
 def main():
     global logger
 
-    if len(sys.argv) != 2:
-        print("Usage: poetry run python calculatepayments.py [dryrun Y|N]")
+    if len(sys.argv) != 3:
+        print("Usage: poetry run python calculatepayments.py [swapunit0 Y|N] [dryrun Y|N]")
         sys.exit(1)
 
     try:
 
         logger = libs.setup_logger(log_file="l0ps.log", log_level=logging.DEBUG, name="calculatepayments")
-        dryrun = sys.argv[1]
+        swapunit0 = sys.argv[1]
+        dryrun = sys.argv[2]
         
         config = libs.load_config_from_file('config.json')
         conn = sqlite3.connect(config['database'])  # Use the database filename from config
@@ -340,7 +392,7 @@ def main():
 
         # Get node balances
         balances = libs.get_balances(config, addr)
-
+        
         # Load info from blocks
         blocksinfo = loadblocksinfo(config, conn)
 
@@ -348,10 +400,27 @@ def main():
         logger.info(f"End block: {blocksinfo['endblock']}")
         logger.info(f"Mined blocks: {blocksinfo['minedblocks']}")
         logger.info(f"Percentage distributed: {config['waves']['percentagetodistribute']}%");
-
+        logger.debug(f"Total tx16calls: {blocksinfo['tx16calls']}, debt: {blocksinfo['nodetx16debt']/10**8}")
+        
         if blocksinfo['minedblocks'] == 0:
             logger.warning(f"No blocks were mined, exiting.")
             sys.exit(1)
+
+        if swapunit0 == 'Y':
+            logger.info("Swapping Unit0 to WAVES")
+            calc_unit0_price = swap_calculate_readonly(config,config['swap']['unit0_asset_id'], config['swap']['waves_asset_id'], 10**8)            
+            unit0_price_inwaves = calc_unit0_price["result"]["value"]["_2"]["value"]
+            logger.info(f"Unit0 price in waves: {unit0_price_inwaves/10**8}")                             
+            logger.info(f"My Unit0 balance: {balances['unit0']['balance']/10**8}")
+            unit0toswap = int(blocksinfo['nodetx16debt'] / unit0_price_inwaves * 10 ** 8)
+            logger.info(f"Unit0 to swap: {unit0toswap}") 
+            
+            tx = swap_execute(config, config['swap']['unit0_asset_id'], config['swap']['waves_asset_id'], int(unit0toswap), int(blocksinfo['nodetx16debt']))
+            
+            logger.info("Unit0 swapped to WAVES")
+        else:
+            logger.info("Not swapping Unit0 to WAVES")
+        
 
         # Load leases info
         leases_x_block, leases_x_id = getleasesinfo(config, conn)
