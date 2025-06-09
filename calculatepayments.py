@@ -8,6 +8,8 @@ import sqlite3
 import datetime
 from pprint import pprint
 
+INVOKE_FEE = 0.005
+
 def savepayments(config, conn, payments, blocksinfo, totals, dryrun):
     global logger
 
@@ -117,16 +119,19 @@ def distribute(config, blocksinfo, balances, leases_x_id):
     enabledtokens = {}
 
     # Check if airdrop balances are sufficient before distribution
-    # if not, skip distribution
+    # if not, exit with an error
     
     airdroppedtokens = {}
     for token, details in config['waves']['airdrops'].items():
         if details['enabled'] and token in balances:
-            if balances[token]['balance'] > details['minamount']:
-                airdroppedtokens[token] = {
-                    'id': details['assetid'],
-                    'decimals': details['decimals']
-                }
+            if balances[token]['balance'] < details['minamount']:
+                logger.error(f"Error: {token} balance is less than {details['minamount']}, exiting.")
+                sys.exit(1)
+                
+            airdroppedtokens[token] = {
+                'id': details['assetid'],
+                'decimals': details['decimals']
+            }
 
     # Calculate airdrop rewards
     for token in airdroppedtokens:
@@ -138,12 +143,7 @@ def distribute(config, blocksinfo, balances, leases_x_id):
     previousblockinfo = blocksinfo['startblock']
     res = libs.blockchainrewards(config['waves']['node'])
     blockrewards = res['currentReward'] / 3
-    logger.debug(f"Nodedebt: {blocksinfo['nodetx16debt']/10**8}")
     
-    # determine debt (fixed)
-    blocknodedebt = blocksinfo['nodetx16debt'] / blocksinfo['minedblocks']
-    logger.debug(f"Block nodedebt: {blocknodedebt/10**8}")
-
     for height, blockinfo in blocksinfo['blocks'].items():
         if blockinfo[1] != config['waves']['generatoraddress']:
             pass
@@ -152,15 +152,9 @@ def distribute(config, blocksinfo, balances, leases_x_id):
             blockfees = previousblockinfo[2] * 0.6 + blockinfo[2] * 0.4
             leasersblockfees = (blockfees * int(config['waves']['percentagetodistribute']) / 100)
             leasersblockrewards = (blockrewards * int(config['waves']['percentagetodistribute']) / 100)
-            leasersblocknodedebt = blocknodedebt * int(config['waves']['percentagetodistribute']) / 100
 
             nodeownerblockfees = blockfees - leasersblockfees
             nodeownerblockrewards = blockrewards - leasersblockrewards
-            nodeownerblocknodedebt = blocknodedebt - leasersblocknodedebt
-            #logger.debug("--------------------------------")
-            #logger.debug(f"Block: {height}, leasers fees: {leasersblockfees}, leasers blockreward: {leasersblockrewards}, leasers blocknodedebt: {leasersblocknodedebt}")
-            #logger.debug(f"Block: {height}, nodeowner fees: {nodeownerblockfees}, nodeowner blockreward: {nodeownerblockrewards}, nodeowner blocknodedebt: {nodeownerblocknodedebt}")            
-
             
             # Leasers rewards
 
@@ -187,10 +181,9 @@ def distribute(config, blocksinfo, balances, leases_x_id):
 
                     fees = int(payments[address]['waves']['share'] * leasersblockfees)
                     rewards = int(payments[address]['waves']['share'] * leasersblockrewards)
-                    debt = int(payments[address]['waves']['share'] * leasersblocknodedebt) 
 
-                    payments[address]['waves']['reward'] += max(0, fees + rewards - debt)
-                    logger.debug(f"{address} share: {payments[address]['waves']['share']}, fees: {fees}, rewards: {rewards}, debt: {debt}, total: {fees + rewards - debt}")
+                    payments[address]['waves']['reward'] += max(0, fees + rewards)
+                    #logger.debug(f"{address} share: {payments[address]['waves']['share']}, fees: {fees}, rewards: {rewards}")
 
                     ############################################
                     # AIRDROPS rewards
@@ -199,7 +192,7 @@ def distribute(config, blocksinfo, balances, leases_x_id):
                     for token, details in airdroppedtokens.items():
                         if leasersairdroprewards[token] > 0:
                             payments[address][token]['reward'] += int(max(0, (payments[address]['waves']['share'] * leasersairdroprewards[token])))
-                            logger.debug(f"{address} {token} share: {payments[address]['waves']['share']}, airdrop reward: {leasersairdroprewards[token]}, total: {payments[address][token]['reward']}")
+                            #logger.debug(f"{address} {token} share: {payments[address]['waves']['share']}, airdrop reward: {leasersairdroprewards[token]}, total: {payments[address][token]['reward']}")
             # Node owner rewards
             
             nodeownerbeneficiaryaddress = config['waves']['nodeownerbeneficiaryaddress']
@@ -210,12 +203,12 @@ def distribute(config, blocksinfo, balances, leases_x_id):
                     if token not in payments[nodeownerbeneficiaryaddress]:
                         payments[nodeownerbeneficiaryaddress][token] = {'id': details['id'], 'reward': 0}
             
-            payments[nodeownerbeneficiaryaddress]['waves']['reward'] += int(max(0, nodeownerblockfees + nodeownerblockrewards - nodeownerblocknodedebt))
-            logger.debug(f"{nodeownerbeneficiaryaddress} fees: {nodeownerblockfees}, rewards: {nodeownerblockrewards}, debt: {nodeownerblocknodedebt}, total: {nodeownerblockfees + nodeownerblockrewards - nodeownerblocknodedebt}")
+            payments[nodeownerbeneficiaryaddress]['waves']['reward'] += int(max(0, nodeownerblockfees + nodeownerblockrewards))
+            #logger.debug(f"{nodeownerbeneficiaryaddress} fees: {nodeownerblockfees}, rewards: {nodeownerblockrewards}, total: {nodeownerblockfees + nodeownerblockrewards}")
            
             for token, details in airdroppedtokens.items():
                 payments[nodeownerbeneficiaryaddress][token]['reward'] += int(max(0, nodeownerairdroprewards[token]))
-                logger.debug(f"{nodeownerbeneficiaryaddress} {token} airdrop reward: {nodeownerairdroprewards[token]}, total: {payments[nodeownerbeneficiaryaddress][token]['reward']}")
+                #logger.debug(f"{nodeownerbeneficiaryaddress} {token} airdrop reward: {nodeownerairdroprewards[token]}, total: {payments[nodeownerbeneficiaryaddress][token]['reward']}")
 
         previousblockinfo = blockinfo
 
@@ -303,7 +296,7 @@ def loadblocksinfo(config, conn):
         blocksinfo['startblock'] = startblock
         blocksinfo['endblock'] = endblock
         blocksinfo['tx16calls'] = tx16calls
-        blocksinfo['nodetx16debt'] = tx16calls * 0.005 * 10 ** 8
+        blocksinfo['nodetx16debt'] = tx16calls * INVOKE_FEE * 10 ** 8
         logger.debug(f"Total tx16calls: {tx16calls}, debt: {blocksinfo['nodetx16debt']/10**8}")
         
         return blocksinfo
@@ -382,8 +375,6 @@ def main():
 
         # check node balance vs amount to be sent
         totals = {}
-
-        pprint(payments)
         
         logger.debug("-------------------- Payments --------------------")
         for address, tokens in payments.items():
