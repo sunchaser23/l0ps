@@ -336,6 +336,7 @@ def swap_calculate_readonly(config, asset_from, asset_to, amount):
 def swap_execute(config, asset_from, asset_to, amount, amount_out_min):
     payment_asset = asset_from if asset_from != "WAVES" else None
     try:
+        my_address = pw.address.Address(privateKey=config['waves']['pk'])
         tx = my_address.invokeScript(
             config['swap']['wx_contract_address'],
             'swap',
@@ -346,15 +347,15 @@ def swap_execute(config, asset_from, asset_to, amount, amount_out_min):
             ],
             [{"assetId": payment_asset, "amount": amount}]
         )
+        if isinstance(tx, dict) and tx.get('error'):
+            logger.error(f"WX swap error: {tx}")
+            return None            
         pw.waitFor(tx['id'])
         return tx
-    except Exception as e:
-        logging.error(f"WX_SWAP_ERROR: {e}")
+    except Exception as e:        
+        logging.error(f"WX_SWAP_ERROR: {traceback.format_exc()}")
         return None
-    if isinstance(tx, dict) and tx.get('error'):
-        print(f"WX swap error: {tx}")
-        return None
-
+    
 
 def main():
     global logger
@@ -406,18 +407,23 @@ def main():
             logger.warning(f"No blocks were mined, exiting.")
             sys.exit(1)
 
+        # swap unit0 to waves for canceling debt
+
         if swapunit0 == 'Y':
             logger.info("Swapping Unit0 to WAVES")
             calc_unit0_price = swap_calculate_readonly(config,config['swap']['unit0_asset_id'], config['swap']['waves_asset_id'], 10**8)            
             unit0_price_inwaves = calc_unit0_price["result"]["value"]["_2"]["value"]
             logger.info(f"Unit0 price in waves: {unit0_price_inwaves/10**8}")                             
             logger.info(f"My Unit0 balance: {balances['unit0']['balance']/10**8}")
-            unit0toswap = int(blocksinfo['nodetx16debt'] / unit0_price_inwaves * 10 ** 8)
+            unit0toswap = int(blocksinfo['nodetx16debt'] * 1.05/ unit0_price_inwaves * 10 ** 8)
             logger.info(f"Unit0 to swap: {unit0toswap}") 
-            
-            tx = swap_execute(config, config['swap']['unit0_asset_id'], config['swap']['waves_asset_id'], int(unit0toswap), int(blocksinfo['nodetx16debt']))
-            
-            logger.info("Unit0 swapped to WAVES")
+            if dryrun == 'N':
+                tx = swap_execute(config, config['swap']['unit0_asset_id'], config['swap']['waves_asset_id'], int(unit0toswap), int(blocksinfo['nodetx16debt']))            
+                if (tx is not None):
+                    logger.info("Unit0 swapped to WAVES")
+                else:
+                    logger.error("Error: Unit0 swap failed, exiting.")
+                    sys.exit(1)
         else:
             logger.info("Not swapping Unit0 to WAVES")
         
