@@ -2,6 +2,7 @@ import logging
 import os
 import requests
 import json
+import sys
 
 def height(host):
     res = wrapper(host, '/blocks/height')

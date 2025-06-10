@@ -1,27 +1,35 @@
 {
     "waves": {
-	"chain" : "T",
-        "node": "http://127.0.0.1:6869/", 
-	"generatoraddress": "3M....g", 
-	"generatoralias": "", 
-	"nodeownerbeneficiaryaddress": "3N...C",
-	"pk": "G...Q",
-	"claimwavesdaolpdappaddress" : "3M...Hhx",
-	"percentagetodistribute": "95",
-	"airdrops": {
-		"unit0": {
-			"assetid": "D...6",
-			"enabled": true,
-			"minamount": 100000000, 
-			"decimals": 8
-     	},
-		"wavesdaolp": {
-			"assetid": "m...M",
-			"enabled": true,
-			"minamount": 100000000, 
-			"decimals": 8
-     	}
-   }
- },
-  "database": "wavespayments.db"
+        "chain" : "T",
+        "node": "http://127.0.0.1:6869/",
+        "generatoraddress": "3M...",
+        "generatoralias": "",
+        "nodeownerbeneficiaryaddress": "3N...",
+        "pk": "",
+        "claimwavesdaolpdappaddress" : "3m...",
+        "percentagetodistribute": "95",
+        "airdrops": {
+                "unit0": {
+                        "assetid": "DL...",
+                        "enabled": true,
+                        "minamount": 1,
+                        "decimals": 8
+        	},
+                "wavesdaolp": {
+                        "assetid": "mc...",
+                        "enabled": false,
+                        "minamount": 1,
+                        "decimals": 8
+        	}
+   	}
+   },
+   "swap": {
+        "unit0_asset_id": "EM...",
+        "waves_asset_id": "WAVES",
+	"wx_contract_address": "3N..."
+   }, 
+  "database": "wavespayments.db",
+  "telegrambottoken": "...",
+  "telegramchat_id": "...",
+  "projectname": "..."
 }
