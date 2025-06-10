@@ -416,7 +416,7 @@ def main():
             logger.info(f"Unit0 price in waves: {unit0_price_inwaves/10**8}")                             
             logger.info(f"My Unit0 balance: {balances['unit0']['balance']/10**8}")
             unit0toswap = int(blocksinfo['nodetx16debt'] * 1.05/ unit0_price_inwaves * 10 ** 8)
-            logger.info(f"Unit0 to swap: {unit0toswap}") 
+            logger.info(f"Unit0 to swap: {unit0toswap/10**8}") 
             if dryrun == 'N':
                 tx = swap_execute(config, config['swap']['unit0_asset_id'], config['swap']['waves_asset_id'], int(unit0toswap), int(blocksinfo['nodetx16debt']))            
                 if (tx is not None):
@@ -482,7 +482,7 @@ def main():
         if (totals['waves']) > balances['waves']['balance']:
             logger.info(f"Node debt: {(balances['waves']['balance'] - totalwavesneeded) / 10 ** 8}")
             logger.error("Not enough balance: add waves to node balance, exiting.")
-            sys.exit(1)
+            #sys.exit(1)
             
         savepayments(config, conn, payments, blocksinfo, totals, dryrun)
         if (dryrun == 'N'):
