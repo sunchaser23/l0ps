@@ -7,7 +7,7 @@ from pprint import pprint
 
 def main():
     if len(sys.argv) != 1:
-        print("Usage: poetry run python waves_claimwavesdaolp.py")
+        print("Usage: poetry run python claimwavesdaolp.py")
         sys.exit(1)
 
 try:
