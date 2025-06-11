@@ -28,8 +28,5 @@
         "waves_asset_id": "WAVES",
 	"wx_contract_address": "3N..."
    }, 
-  "database": "wavespayments.db",
-  "telegrambottoken": "...",
-  "telegramchat_id": "...",
-  "projectname": "..."
+  "database": "wavespayments.db"
 }
