@@ -40,3 +40,6 @@ CREATE TABLE waves_paymentdetails (
     token_id TEXT NOT NULL,
     amount INTEGER NOT NULL
 );
+
+ALTER TABLE waves_blocks ADD COLUMN tx16calls int;
+UPDATE waves_blocks SET tx16calls = 0;
