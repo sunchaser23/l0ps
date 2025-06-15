@@ -2,11 +2,13 @@ import logging
 import os
 import requests
 import json
+import sys
 
 def height(host):
     res = wrapper(host, '/blocks/height')
-    if res is not False:
+    if res is not None:
         return res['height']
+    return None
 
 def get_balances(config, addr):
     balances = {}
@@ -46,38 +48,40 @@ def setup_logger(log_file="app.log", log_level=logging.INFO, name=__name__):
     # Create a formatter
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     file_handler.setFormatter(formatter)
-    console_handler.setFormatter(formatter)
-
+    
     # Add handlers to the logger
     logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
-
+    
     return logger
 
 def wrapper(host, api, postData='', headers=''):
 
     if postData:
-        req = requests.post('%s%s' % (host, api), data=postData, headers={'content-type': 'application/json'})
+        req = requests.post('%s%s' % (host, api), data=postData, headers={'content-type': 'application/json'}, timeout=30)
     else:
-        req = requests.get('%s%s' % (host, api), headers=headers)
+        req = requests.get('%s%s' % (host, api), headers=headers, timeout=30)
     try:
-        #print(req)
         return req.json()
     except json.JSONDecodeError as e:
         print(f"> JSON Decode error: {e}")
+        return None
+    except Exception as e:
+        print(f"> Request error: {e}")
         return None
 
 def blockchainrewards(host):
     """Gets blockchain reward"""
     res = wrapper(host, f"/blockchain/rewards")
-    if res is not False:
+    if res is not None:
         return res
+    return None
 
 def tx(host, tx_id):
     """Gets a transaction by its ID."""
     res = wrapper(host, f"/transactions/info/{tx_id}")
-    if res is not False:
+    if res is not None:
         return res
+    return None
 
 def tx_bulk(host, tx_ids):
     """Gets multiple transactions by their IDs in chunks."""
@@ -88,8 +92,8 @@ def tx_bulk(host, tx_ids):
     for i in range(0, len(tx_ids), chunk_size):
         chunk_ids = tx_ids[i:i + chunk_size]
         body = json.dumps({"ids": chunk_ids})
-        res = wrapper(host, "/transactions/info", postData=body)
-        if res is not False:
+        res = wrapper(host, "/transactions/info", postData=body)        
+        if res is not None:
             all_results.extend(res)
         else:
             print(f"Failed to fetch or unexpected response for chunk starting at index {i}: {res}")

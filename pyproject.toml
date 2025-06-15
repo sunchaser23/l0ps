@@ -1,6 +1,6 @@
 [project]
 name = "l0ps"
-version = "0.1.0"
+version = "0.1.1"
 description = "L0 WAVES Payment Script"
 authors = [
     {name = "Sunchaser23",email = "qflcpt@protonmail.com"}
