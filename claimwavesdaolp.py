@@ -19,12 +19,7 @@ try:
     logger.info(f"Operating from address: {addr.address}");
 
     dappaddr = pw.address.Address(config['waves']['claimwavesdaolpdappaddress'])
-    tx = addr.invokeScript(dappaddr.address, 'processBlocks')
-    if ('error' in tx):
-        raise Exception(tx['message'])
-    else:
-        pw.waitFor(tx['id'])
-
+    addr.invokeScript(dappaddr.address, 'processBlocks')
     tx = addr.invokeScript(dappaddr.address, 'claimLP')    
     if ('error' in tx):
         if 'nothing to claim' in tx['message']:
