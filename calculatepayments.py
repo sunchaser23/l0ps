@@ -409,7 +409,7 @@ def main():
 
         # swap unit0 to waves for canceling debt
 
-        if swapunit0 == 'Y':
+        if swapunit0 == 'Y' and blocksinfo['nodetx16debt'] > 0:
             logger.info("Swapping Unit0 to WAVES")
             calc_unit0_price = swap_calculate_readonly(config,config['swap']['unit0_asset_id'], config['swap']['waves_asset_id'], 10**8)            
             unit0_price_inwaves = calc_unit0_price["result"]["value"]["_2"]["value"]
@@ -424,6 +424,8 @@ def main():
                 else:
                     logger.error("Error: Unit0 swap failed, exiting.")
                     sys.exit(1)
+                # refresh balances
+                balances = libs.get_balances(config, addr)
         else:
             logger.info("Not swapping Unit0 to WAVES")
         
